@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .split import read_jsonl, split_examples
+from .split import read_jsonl, split_examples, write_jsonl
+
+
+def _rows_sha256(rows: list[dict]) -> str:
+    payload = "".join(f"{row!r}\n" for row in rows).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -16,6 +22,8 @@ class DatasetPartitions:
     validation_texts: tuple[str, ...]
     seed: int
     validation_ratio: float
+    train_sha256: str
+    validation_sha256: str
 
     @property
     def train_count(self) -> int:
@@ -35,4 +43,6 @@ def load_partitions(path: str | Path, *, validation_ratio: float = 0.1, seed: in
         validation_texts=tuple(row["text"] for row in validation),
         seed=seed,
         validation_ratio=validation_ratio,
+        train_sha256=_rows_sha256(train),
+        validation_sha256=_rows_sha256(validation),
     )
