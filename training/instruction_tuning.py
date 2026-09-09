@@ -88,6 +88,22 @@ def evaluate(model: DawelingTransformer, examples: list[InstructionExample], tok
     return sum(losses) / len(losses)
 
 
+def _save_checkpoint(output_path: Path, model: DawelingTransformer, config: ModelConfig, pretrained_path: Path | None, *, step: int, validation_loss: float | None, kind: str) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "config": config.__dict__,
+            "state_dict": model.state_dict(),
+            "stage": "instruction_tuning",
+            "checkpoint_kind": kind,
+            "step": step,
+            "validation_loss": validation_loss,
+            "pretrained_from": str(pretrained_path) if pretrained_path else None,
+        },
+        output_path,
+    )
+
+
 def train_instruction_model(
     dataset_path: Path,
     output_path: Path,
@@ -110,6 +126,10 @@ def train_instruction_model(
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     model.train()
+    best_validation_loss: float | None = None
+    best_step: int | None = None
+    evaluation_interval = 10
+
     for step in range(steps):
         example = train_examples[step % len(train_examples)]
         input_ids, targets = make_example(example, tokenizer, config.max_sequence_length)
@@ -120,13 +140,38 @@ def train_instruction_model(
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
-        if step == 0 or (step + 1) % 10 == 0:
+
+        completed_step = step + 1
+        if step == 0 or completed_step % evaluation_interval == 0 or completed_step == steps:
             val_loss = evaluate(model, validation_examples, tokenizer, config.max_sequence_length, device)
             suffix = f" val_loss={val_loss:.4f}" if val_loss is not None else ""
-            print(f"step={step + 1} loss={loss.item():.4f}{suffix}")
+            print(f"step={completed_step} loss={loss.item():.4f}{suffix}")
+            if val_loss is not None and (best_validation_loss is None or val_loss < best_validation_loss):
+                best_validation_loss = val_loss
+                best_step = completed_step
+                best_path = output_path.with_name(f"{output_path.stem}.best{output_path.suffix}")
+                _save_checkpoint(
+                    best_path,
+                    model,
+                    config,
+                    pretrained_path,
+                    step=completed_step,
+                    validation_loss=val_loss,
+                    kind="best",
+                )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"config": config.__dict__, "state_dict": model.state_dict(), "stage": "instruction_tuning", "pretrained_from": str(pretrained_path) if pretrained_path else None}, output_path)
+    _save_checkpoint(
+        output_path,
+        model,
+        config,
+        pretrained_path,
+        step=steps,
+        validation_loss=best_validation_loss,
+        kind="last",
+    )
+    if best_step is not None:
+        best_path = output_path.with_name(f"{output_path.stem}.best{output_path.suffix}")
+        print(f"best checkpoint: {best_path} step={best_step} val_loss={best_validation_loss:.4f}")
     print(f"saved checkpoint: {output_path}")
 
 
