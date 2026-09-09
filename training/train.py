@@ -32,33 +32,33 @@ def make_examples_from_texts(texts: tuple[str, ...], tokenizer: DawelingTokenize
     return examples
 
 
-def stack_examples(examples: list[tuple[torch.Tensor, torch.Tensor]]) -> tuple[torch.Tensor, torch.Tensor]:
-    """Materialize fixed-length examples once to avoid repeated Python stacking."""
-    if not examples:
-        raise ValueError("examples must not be empty")
-    return torch.stack([item[0] for item in examples]), torch.stack([item[1] for item in examples])
+def make_batch(
+    examples: list[tuple[torch.Tensor, torch.Tensor]],
+    batch_size: int,
+    step: int,
+    *,
+    seed: int = 0,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return a deterministic shuffled mini-batch.
 
-
-def make_batch(examples: list[tuple[torch.Tensor, torch.Tensor]], batch_size: int, step: int) -> tuple[torch.Tensor, torch.Tensor]:
+    A fresh permutation is created per epoch, making training less sensitive to
+    the original dataset ordering while keeping exact reproducibility on resume.
+    """
     if not examples:
         raise ValueError("examples must not be empty")
     if batch_size <= 0:
         raise ValueError("batch_size must be greater than zero")
-    indices = [(step * batch_size + offset) % len(examples) for offset in range(batch_size)]
+    batches_per_epoch = max(1, (len(examples) + batch_size - 1) // batch_size)
+    epoch = step // batches_per_epoch
+    batch_in_epoch = step % batches_per_epoch
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(seed + epoch)
+    permutation = torch.randperm(len(examples), generator=generator).tolist()
+    start = batch_in_epoch * batch_size
+    indices = permutation[start : start + batch_size]
+    if len(indices) < batch_size:
+        indices.extend(permutation[: batch_size - len(indices)])
     return torch.stack([examples[i][0] for i in indices]), torch.stack([examples[i][1] for i in indices])
-
-
-def make_tensor_batch(inputs: torch.Tensor, targets: torch.Tensor, batch_size: int, step: int) -> tuple[torch.Tensor, torch.Tensor]:
-    """Select a cyclic batch directly from pre-stacked training tensors."""
-    if inputs.ndim != 2 or targets.ndim != 2 or inputs.shape != targets.shape:
-        raise ValueError("inputs and targets must be matching rank-2 tensors")
-    if inputs.shape[0] == 0:
-        raise ValueError("examples must not be empty")
-    if batch_size <= 0:
-        raise ValueError("batch_size must be greater than zero")
-    start = (step * batch_size) % inputs.shape[0]
-    indices = (torch.arange(batch_size) + start) % inputs.shape[0]
-    return inputs.index_select(0, indices), targets.index_select(0, indices)
 
 
 def validation_loss(model: DawelingTransformer, examples: list[tuple[torch.Tensor, torch.Tensor]], batch_size: int = 1) -> float:
@@ -139,8 +139,8 @@ def train(text_path: Path | None, output_path: Path, steps: int, learning_rate: 
         raise ValueError("training data is too short for the configured sequence length")
     if not validation_examples:
         raise ValueError("validation data is too short for the configured sequence length")
-    train_inputs, train_targets = stack_examples(examples)
-    training_config = {"steps": steps, "learning_rate": learning_rate, "min_learning_rate": min_learning_rate, "warmup_steps": warmup_steps, "schedule": "warmup_cosine", "sequence_length": config.max_sequence_length, "optimizer": "AdamW", "gradient_clip_norm": 1.0, "batch_size": batch_size, "gradient_accumulation_steps": gradient_accumulation_steps, "effective_batch_size": batch_size * gradient_accumulation_steps, "validation_interval": validation_interval, "example_count": len(examples), "validation_example_count": len(validation_examples), "dataset_split": split_config}
+    batches_per_epoch = max(1, (len(examples) + batch_size - 1) // batch_size)
+    training_config = {"steps": steps, "learning_rate": learning_rate, "min_learning_rate": min_learning_rate, "warmup_steps": warmup_steps, "schedule": "warmup_cosine", "sequence_length": config.max_sequence_length, "optimizer": "AdamW", "gradient_clip_norm": 1.0, "batch_size": batch_size, "gradient_accumulation_steps": gradient_accumulation_steps, "effective_batch_size": batch_size * gradient_accumulation_steps, "validation_interval": validation_interval, "example_count": len(examples), "validation_example_count": len(validation_examples), "batches_per_epoch": batches_per_epoch, "shuffle": "seeded_epoch_permutation", "dataset_split": split_config}
     model_config = config.__dict__
     run_id = make_run_id(stage="pretraining", dataset_sha256=dataset_sha256, model_config=model_config, training_config=training_config, seed=seed)
     start_step = 0
@@ -166,7 +166,7 @@ def train(text_path: Path | None, output_path: Path, steps: int, learning_rate: 
         for group in optimizer.param_groups:
             group["lr"] = current_lr
         model.train()
-        inputs, targets = make_tensor_batch(train_inputs, train_targets, batch_size, step)
+        inputs, targets = make_batch(examples, batch_size, step, seed=seed)
         _, loss = model(inputs, targets)
         assert loss is not None
         (loss / gradient_accumulation_steps).backward()
