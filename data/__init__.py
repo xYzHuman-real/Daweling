@@ -1,8 +1,7 @@
-"""Dataset preparation and provenance utilities for Daweling."""
+"""Public data-engine APIs."""
 
 from .manifest import DatasetManifest, canonical_example_hash, sha256_file
 from .prepare import normalize_example, prepare_dataset, validate_example
-from .split import split_examples
 
 __all__ = [
     "DatasetManifest",
@@ -10,6 +9,5 @@ __all__ = [
     "normalize_example",
     "prepare_dataset",
     "sha256_file",
-    "split_examples",
     "validate_example",
 ]

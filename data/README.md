@@ -1,53 +1,38 @@
-# Daweling Data
+# Daweling Data Engine
 
-This directory contains the reproducible data pipeline used to prepare datasets for Daweling model development.
+The data engine turns raw JSONL examples into reproducible training inputs.
 
 ## Pipeline
 
-```text
-raw JSONL
-   ↓
-validation
-   ↓
-normalization
-   ↓
-deduplication
-   ↓
-clean JSONL + dataset manifest
-   ↓
-deterministic train/validation split
-   ↓
-training
-```
+`raw JSONL → validation → normalization → deterministic deduplication → fingerprinted dataset → manifest`
 
-## Dataset manifest
-
-`data.prepare.prepare_dataset()` creates a `DatasetManifest` containing:
+Each prepared dataset can have a JSON manifest containing:
 
 - dataset version
-- input and output SHA-256 fingerprints
-- example count
-- duplicate count
-- source inventory
+- input/output paths
+- SHA-256 fingerprints
+- valid, duplicate, and invalid counts
 - preprocessing configuration
-- optional experiment metadata
+- source/provenance metadata
 
-Example:
+## Prepare a dataset
+
+The original two-argument command remains supported:
 
 ```bash
-python data/prepare.py raw.jsonl data/clean.jsonl --version train-v1 --manifest data/train-v1.manifest.json
+python data/prepare.py input.jsonl cleaned.jsonl
 ```
 
-The manifest makes a prepared dataset identifiable and helps connect future training runs to the exact data artifact used.
+To also write a manifest:
 
-## Data quality
+```bash
+python data/prepare.py input.jsonl cleaned.jsonl --manifest data/manifests/v1.json --version v1 --source my-source
+```
 
-Each example must contain a non-empty `text` and `source`. Optional `quality` values must be numeric and between 0 and 1. Preparation trims the required string fields and removes exact canonical duplicates deterministically.
+Invalid JSON lines and schema-invalid examples are excluded rather than entering training data. Duplicate examples are removed deterministically using a canonical SHA-256 fingerprint.
 
-## Principles
+## Reproducibility
 
-- Keep raw/source data separate from generated and processed data.
-- Never commit secrets, private personal data, or licensed material without permission.
-- Record dataset provenance and transformations in metadata.
-- Keep evaluation data separate from training data to reduce leakage.
-- Do not commit large training corpora or generated dataset artifacts to the repository.
+A manifest should travel with the dataset through training and evaluation. The input and output hashes make it possible to detect accidental changes before an experiment is reproduced.
+
+Large corpora should remain outside the repository. Never commit secrets, private personal data, or material you do not have permission to use.

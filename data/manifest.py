@@ -1,4 +1,4 @@
-"""Versioned, reproducible manifests for Daweling datasets."""
+"""Dataset provenance, fingerprints, and reproducibility manifests."""
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
-
-MANIFEST_VERSION = 1
+MANIFEST_VERSION = "1"
 
 
 def sha256_file(path: str | Path) -> str:
@@ -21,14 +20,13 @@ def sha256_file(path: str | Path) -> str:
 
 
 def canonical_example_hash(example: Mapping[str, Any]) -> str:
-    """Return a stable identity for an example independent of JSON key order."""
     payload = json.dumps(dict(example), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
 class DatasetManifest:
-    """Immutable metadata describing one prepared dataset artifact."""
+    """Machine-readable record of a prepared dataset and its lineage."""
 
     dataset_version: str
     input_path: str
@@ -36,13 +34,18 @@ class DatasetManifest:
     input_sha256: str
     output_sha256: str
     example_count: int
-    duplicate_count: int = 0
-    rejected_count: int = 0
+    duplicate_count: int
+    invalid_count: int
     split_counts: dict[str, int] = field(default_factory=dict)
     preprocessing: dict[str, Any] = field(default_factory=dict)
-    sources: tuple[str, ...] = ()
+    sources: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-    manifest_version: int = MANIFEST_VERSION
+    manifest_version: str = MANIFEST_VERSION
+
+    def __post_init__(self) -> None:
+        for name in ("example_count", "duplicate_count", "invalid_count"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be non-negative")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -50,15 +53,8 @@ class DatasetManifest:
     def save(self, path: str | Path) -> None:
         destination = Path(path)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(
-            json.dumps(self.to_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        destination.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     @classmethod
     def load(cls, path: str | Path) -> "DatasetManifest":
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        if payload.get("manifest_version") != MANIFEST_VERSION:
-            raise ValueError("unsupported dataset manifest version")
-        payload["sources"] = tuple(payload.get("sources", ()))
-        return cls(**payload)
+        return cls(**json.loads(Path(path).read_text(encoding="utf-8")))
