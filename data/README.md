@@ -1,17 +1,19 @@
 # Daweling Data Engine
 
-The data engine turns raw JSONL examples into reproducible training inputs.
+The data engine turns raw JSONL examples into reproducible, quality-controlled training inputs.
 
 ## Pipeline
 
-`raw JSONL → validation → normalization → deterministic deduplication → fingerprinted dataset → manifest`
+`raw JSONL → schema validation → quality filtering → normalization → contamination filtering → deterministic deduplication → fingerprinted dataset → manifest`
 
 Each prepared dataset can have a JSON manifest containing:
 
 - dataset version
 - input/output paths
 - SHA-256 fingerprints
-- valid, duplicate, and invalid counts
+- valid, duplicate, invalid, and quality-rejected counts
+- quality issue counts
+- contamination-rejected counts and benchmark IDs
 - preprocessing configuration
 - source/provenance metadata
 
@@ -29,7 +31,25 @@ To also write a manifest:
 python data/prepare.py input.jsonl cleaned.jsonl --manifest data/manifests/v1.json --version v1 --source my-source
 ```
 
-Invalid JSON lines and schema-invalid examples are excluded rather than entering training data. Duplicate examples are removed deterministically using a canonical SHA-256 fingerprint.
+### Quality controls
+
+Examples are rejected when they fail schema validation or configured quality limits. By default, examples must contain between 1 and 200,000 characters. The limits can be tightened for a particular corpus:
+
+```bash
+python data/prepare.py input.jsonl cleaned.jsonl --min-chars 20 --max-chars 100000
+```
+
+Accepted text is stripped of surrounding whitespace before fingerprinting and output. Deduplication uses a canonical SHA-256 representation, so the same normalized example is emitted only once and the result is deterministic.
+
+### Evaluation contamination controls
+
+A benchmark JSONL file can be supplied to exclude training examples containing the normalized benchmark prompt + expected answer pair:
+
+```bash
+python data/prepare.py input.jsonl cleaned.jsonl --benchmark-jsonl evaluation.jsonl
+```
+
+The manifest records which benchmark IDs caused exclusions. This makes the training/evaluation boundary auditable instead of silently relying on manual dataset inspection.
 
 ## Reproducibility
 
