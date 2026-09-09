@@ -1,8 +1,9 @@
 """Public application service for running Daweling end to end."""
 
-from agents import AgentExecutor, AgentRegistry, AgentExecution, AgentRouter, CodingAgent, ResearchAgent
-from core.models import Goal
+from agents import AgentExecutor, AgentRegistry, AgentRouter, CodingAgent, ResearchAgent
+from core.models import Action, Goal
 from core.policy import ApprovalPolicy
+from core.recovery import RecoveryCallback, RecoveryEngine
 from core.runtime import Runtime
 from memory import ExperienceRecorder, MemoryStore
 from memory.context import ContextEngine
@@ -26,6 +27,7 @@ class Daweling:
         agent_registry: AgentRegistry | None = None,
         approval_policy: ApprovalPolicy | None = None,
         capability_config: CapabilityConfig | None = None,
+        max_recovery_attempts: int = 2,
     ) -> None:
         self.registry = registry or ToolRegistry()
         self.memory = memory or MemoryStore()
@@ -42,10 +44,9 @@ class Daweling:
         self.agent_executor = AgentExecutor(self.agent_router)
 
         self._configure_capabilities(capability_config or CapabilityConfig.from_env())
-        self.orchestrator = Orchestrator(
-            planner=self.planner,
-            runtime=Runtime(self.registry, approval_policy=approval_policy),
-        )
+        runtime = Runtime(self.registry, approval_policy=approval_policy)
+        self.orchestrator = Orchestrator(planner=self.planner, runtime=runtime)
+        self.recovery = RecoveryEngine(runtime, max_attempts=max_recovery_attempts)
 
     def _configure_capabilities(self, config: CapabilityConfig) -> None:
         """Register only capabilities whose external endpoints are explicitly configured."""
@@ -66,38 +67,57 @@ class Daweling:
                 )
             )
 
-    def run(self, goal: Goal) -> ExecutionResult:
-        """Execute Goal → Plan → Agent → Action → Tool → Verify → Learn."""
+    def _prepare(self, goal: Goal):
+        """Build the model plan, agent work, and executable actions for a goal."""
         context = self.context_engine.build(goal)
         plan = self.planner.create_plan(goal, context=context)
-
-        agent_executions = self.agent_executor.execute(
-            plan,
-            context=context.as_dict(),
-        )
+        agent_executions = self.agent_executor.execute(plan, context=context.as_dict())
         agent_work = self.agent_executor.as_action_context(agent_executions)
-
         actions = self.action_builder.build_actions(plan, agent_context=agent_work)
         self.orchestrator.validate_actions(plan, actions)
+        return plan, actions, agent_work
+
+    def _record_result(self, goal: Goal, result: ExecutionResult, actions: list[Action]) -> ExecutionResult:
+        """Persist execution experience for future planning."""
+        self.experience_recorder.record(
+            goal=goal.description,
+            success=result.success,
+            verifications=result.verifications,
+            task_count=len(result.plan.tasks),
+            successful_tasks=sum(observation.success for observation in result.observations),
+            failed_tasks=sum(not observation.success for observation in result.observations),
+            tools_used=[action.tool for action in actions],
+        )
+        return result
+
+    def run(self, goal: Goal) -> ExecutionResult:
+        """Execute Goal → Plan → Agent → Action → Tool → Verify → Learn."""
+        plan, actions, agent_work = self._prepare(goal)
         observations = self.orchestrator.runtime.execute(plan, actions)
-        verifications = [
-            self.orchestrator.runtime.verify(observation)
-            for observation in observations
-        ]
+        verifications = [self.orchestrator.runtime.verify(observation) for observation in observations]
+        return self._record_result(
+            goal,
+            ExecutionResult(plan=plan, observations=observations, verifications=verifications, agent_work=agent_work),
+            actions,
+        )
+
+    def run_with_recovery(self, goal: Goal, recover: RecoveryCallback) -> ExecutionResult:
+        """Execute a goal while allowing bounded recovery after failed tool actions."""
+        plan, actions, agent_work = self._prepare(goal)
+        observations = []
+        verifications = []
+        for action in actions:
+            recovery_result = self.recovery.execute(plan, action, recover)
+            final_observation = recovery_result.observations[-1]
+            observations.append(final_observation)
+            verifications.append(self.orchestrator.runtime.verify(final_observation))
+            if not final_observation.success:
+                break
+
         result = ExecutionResult(
             plan=plan,
             observations=observations,
             verifications=verifications,
             agent_work=agent_work,
         )
-
-        self.experience_recorder.record(
-            goal=goal.description,
-            success=result.success,
-            verifications=verifications,
-            task_count=len(plan.tasks),
-            successful_tasks=sum(observation.success for observation in observations),
-            failed_tasks=sum(not observation.success for observation in observations),
-            tools_used=[action.tool for action in actions],
-        )
-        return result
+        return self._record_result(goal, result, actions)
