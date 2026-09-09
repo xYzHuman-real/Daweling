@@ -1,4 +1,4 @@
-"""Minimal execution runtime for Daweling's first core loop."""
+"""Execution runtime with policy checks for Daweling's core loop."""
 
 from typing import Iterable
 
@@ -6,13 +6,19 @@ from tools.base import ToolResult
 from tools.registry import ToolRegistry
 
 from .models import Action, Observation, Plan, Task, VerificationResult, WorkflowState
+from .policy import ApprovalPolicy, ToolRisk
 
 
 class Runtime:
-    """Execute a plan through registered tools and verify each observation."""
+    """Execute a plan through registered tools and enforce execution policy."""
 
-    def __init__(self, registry: ToolRegistry | None = None) -> None:
+    def __init__(
+        self,
+        registry: ToolRegistry | None = None,
+        approval_policy: ApprovalPolicy | None = None,
+    ) -> None:
         self.registry = registry or ToolRegistry()
+        self.approval_policy = approval_policy or ApprovalPolicy()
 
     def register_tool(self, tool) -> None:
         """Register a BaseTool with this runtime."""
@@ -31,6 +37,15 @@ class Runtime:
                     task_id=action.task_id,
                     success=False,
                     error=f"Unknown tool: {action.tool}",
+                )
+            elif tool.risk_level == ToolRisk.APPROVAL_REQUIRED and not self.approval_policy.allows(
+                tool.name,
+                f"Execute '{tool.name}' for task '{task.description}'",
+            ):
+                observation = Observation(
+                    task_id=action.task_id,
+                    success=False,
+                    error=f"Approval required before executing tool: {tool.name}",
                 )
             else:
                 try:
