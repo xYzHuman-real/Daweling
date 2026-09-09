@@ -1,34 +1,30 @@
 # Daweling
 
-> **An execution-first AI system — built to turn goals into verified results.**
+**An execution-first AI system — built to turn goals into verified results.**
 
-Daweling is an ambitious AI project focused on going beyond a traditional question-and-answer chatbot.
+Daweling is an independent AI-system research project focused on building intelligence as a complete loop rather than as a text generator alone.
 
 ## Vision
 
-Daweling should eventually be able to:
+Daweling aims to combine:
 
-1. Understand a user's goal and context.
-2. Reason about the goal using a bounded structured process.
-3. Select an appropriate strategy and specialist for each task.
-4. Break complex goals into actionable plans.
-5. Research and gather information using tools.
-6. Write, run, inspect, and improve software.
-7. Use specialized agents that collaborate on shared work.
-8. Recover from failures and adapt the task plan.
-9. Learn reusable workflow strategies from verified outcomes.
-10. Maintain useful project memory.
-11. Verify important outputs using explicit evidence before presenting them.
-12. Measure intelligence and system capability with repeatable evaluations and regression gates.
-13. Execute multi-step workflows with appropriate user approval.
+- goal and context understanding
+- bounded structured reasoning
+- strategy selection
+- planning and decomposition
+- dynamic specialist-agent routing
+- tool use
+- evidence-based verification
+- bounded recovery and adaptive replanning
+- persistent workflow memory
+- reusable learned strategy guidance
+- capability-level evaluation and regression gates
 
-## Core principle
+Core principle:
 
 **Think → Understand → Select Strategy → Plan → Act → Verify → Recover → Replan → Learn → Measure.**
 
-Daweling is not being built as a collection of random AI features. Every component should support the core loop above.
-
-## Initial architecture
+## Architecture
 
 ```text
 User
@@ -39,65 +35,74 @@ Goal & Context Understanding
   ↓
 Structured Intelligence Core
   ├── Understanding
+  ├── Bounded Reasoning
   ├── Strategy Selection
-  ├── Bounded Reasoning Steps
   └── Uncertainty Tracking
-             ↓
+  ↓
 Memory + Learned Strategy Guidance
-             ↓
+  ↓
 Planning Engine
-             ↓
+  ↓
 Dynamic Agent Routing
-             ↓
+  ├── Research
+  ├── Coding
+  ├── Writing
+  └── Analysis
+  ↓
 Tools & External Systems
-             ↓
+  ↓
 Evidence Verification
-             ↓
+  ↓
 Deterministic Decision Engine
-             ├── Review
-             ├── Recover
-             ├── Replan
-             ├── Complete
-             └── Fail
-             ↓
+  ├── Review
+  ├── Recover
+  ├── Replan
+  ├── Complete
+  └── Fail
+  ↓
 Experience Recorder
-             ↓
+  ↓
 Learned Guidance
-             ↺
-Intelligence Evaluation
-  ├── Capability Scores
-  ├── Weighted Aggregate
-  └── Regression Gates
+  ↺
+Capability Evaluation
+  ↓
+Regression Gates
 ```
 
-## Development strategy
+## Model development
 
-Daweling will be developed incrementally:
+Daweling includes a small decoder-only Transformer, a deterministic UTF-8 byte tokenizer, resumable training checkpoints, dataset manifests, deterministic train/validation splitting, instruction tuning, structured reasoning training, and capability evaluation.
 
-- **Phase 0 — Foundation:** repository structure, contracts, configuration, and engineering standards.
-- **Phase 1 — Core loop:** goal → plan → tool/action → result → verification.
-- **Phase 2 — Agents:** specialized agents behind a common orchestration layer, with bounded collaboration.
-- **Phase 3 — Memory & learning:** durable project/context memory, workflow experiences, and reusable strategy guidance.
-- **Phase 4 — Intelligence:** structured reasoning, strategy selection, dynamic routing, evidence verification, and intelligence benchmarks.
-- **Phase 5 — Product & scale:** user-facing interface, deployment, reliability, model routing, cost optimization, and advanced autonomy.
+The training stack now includes a real curriculum-aware batch path: prepared dataset rows can carry `stage` and `weight` metadata, and pretraining selects weighted fixed-length windows from the stages reached at each curriculum epoch.
+
+Curriculum progression:
+
+```text
+LANGUAGE → INSTRUCTION → REASONING → TOOL_USE → VERIFICATION → END_TO_END
+```
+
+The curriculum is a training mechanism, not a claim of frontier capability. Daweling remains an early model-development project and requires substantially more data, compute, training, evaluation, and iteration before it can approach frontier systems.
 
 ## Engineering principles
 
-- Modular over monolithic.
-- Testable over clever.
-- Observable over opaque.
-- Verified over merely plausible.
-- Human approval for consequential actions.
-- Provider/model agnostic where practical.
-- Security and privacy from the beginning.
-- Deterministic control policy over opaque model-controlled execution.
-- Learn from verified outcomes, not from untrusted assumptions.
-- Keep internal reasoning private; expose concise conclusions and evidence instead.
-- Verification must rely on explicit evidence rather than treating model text as proof.
-- Intelligence improvements must be measurable with repeatable evaluation cases and regression thresholds.
+1. **Evidence over confidence** — important decisions should be supported by observable results.
+2. **Bounded autonomy** — retries, recovery, and replanning have explicit limits.
+3. **Deterministic control** — the model proposes; policy and verification decide.
+4. **Private reasoning boundary** — internal reasoning is not persisted as a user-facing trace.
+5. **Repeatable evaluation** — capability changes must be measurable and regression-tested.
+6. **Training lineage** — datasets, configurations, seeds, checkpoints, and parents are recorded.
+7. **Curriculum discipline** — capability stages are explicit, weighted, deterministic, and reproducible.
 
-## Status
+## Development status
 
-🚧 **Daweling is in active foundation development.**
+### 🟢 Intelligence infrastructure
 
-The runtime now has bounded failure recovery, adaptive replanning, shared-context multi-agent collaboration, peer review, a deterministic decision layer, learned strategy guidance, a structured intelligence core, dynamic strategy-based agent routing, evidence-based verification, capability-level intelligence evaluation, and a standard intelligence benchmark suite with capability regression gates. This is still an early foundation—not a frontier-scale model—and the architecture is intentionally being built so model capability can grow without replacing the system around it.
+The execution system has a working foundation for planning, dynamic agent routing, tools, verification, deterministic decisions, peer review, bounded recovery, adaptive replanning, memory, and learned workflow guidance.
+
+### 🟡 Model capability
+
+The data/training infrastructure is substantially developed, including curriculum scheduling and deterministic checkpoint lineage. The actual model capability is still developing and must be demonstrated through real training runs and benchmark results.
+
+### Next major milestone
+
+Build and train a versioned high-quality capability mixture across language, instruction, reasoning, tool-use, and verification data, then evaluate each checkpoint and promote only models that pass the regression gates.
