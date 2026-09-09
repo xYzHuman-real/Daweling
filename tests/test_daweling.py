@@ -1,4 +1,4 @@
-from core.models import Goal
+from core.models import Action, Goal
 from daweling import Daweling
 from models import ModelMessage, ModelProvider, ModelResponse
 from tools.base import BaseTool, ToolResult
@@ -21,6 +21,20 @@ class EchoTool(BaseTool):
 
     def run(self, input_data):
         return ToolResult.ok(input_data.get("message", ""))
+
+
+class RecoverableTool(BaseTool):
+    name = "recoverable"
+    description = "Fails on the first call and succeeds on the next call."
+
+    def __init__(self):
+        self.calls = 0
+
+    def run(self, input_data):
+        self.calls += 1
+        if self.calls == 1:
+            return ToolResult.fail("temporary problem")
+        return ToolResult.ok(input_data.get("message", "recovered"))
 
 
 def test_daweling_runs_model_to_verified_result():
@@ -55,3 +69,27 @@ def test_daweling_keeps_model_selection_separate_from_execution():
         assert "unavailable tool" in str(exc)
     else:
         raise AssertionError("Expected unavailable tool selection to fail before execution")
+
+
+def test_daweling_can_recover_from_a_failed_tool_action():
+    provider = ScriptedProvider(
+        [
+            '{"tasks":[{"id":"task-1","description":"Recover"}]}',
+            '{"actions":[{"task_id":"task-1","tool":"recoverable","input":{"message":"first"}}]}',
+        ]
+    )
+    tool = RecoverableTool()
+    daweling = Daweling(provider, ToolRegistry([tool]))
+
+    result = daweling.run_with_recovery(
+        Goal("Recover"),
+        lambda action, _observation, _attempt: Action(
+            action.task_id,
+            action.tool,
+            {"message": "recovered"},
+        ),
+    )
+
+    assert result.success is True
+    assert result.observations[0].output == "recovered"
+    assert tool.calls == 2
