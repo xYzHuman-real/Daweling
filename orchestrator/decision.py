@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from agents.collaboration import CollaborationResult
-from agents.debate import DebateResult
 from core.models import Observation, Plan, VerificationResult
+
+if TYPE_CHECKING:
+    from agents.collaboration import CollaborationResult
+    from agents.debate import DebateResult
 
 
 class NextStep(str, Enum):
@@ -29,8 +31,8 @@ class DecisionContext:
     plan: Plan
     observations: tuple[Observation, ...] = ()
     verifications: tuple[VerificationResult, ...] = ()
-    collaboration: CollaborationResult | None = None
-    review: DebateResult | None = None
+    collaboration: "CollaborationResult | None" = None
+    review: "DebateResult | None" = None
     recovery_attempts: int = 0
     max_recovery_attempts: int = 2
     replan_rounds: int = 0
