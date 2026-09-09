@@ -101,16 +101,27 @@ class Daweling:
             actions,
         )
 
-    def run_with_recovery(self, goal: Goal, recover: RecoveryCallback) -> ExecutionResult:
-        """Execute a goal while allowing bounded recovery after failed tool actions."""
+    def run_with_recovery(self, goal: Goal, recover: RecoveryCallback | None = None) -> ExecutionResult:
+        """Execute a goal and recover failed actions with a supplied or model-driven strategy."""
         plan, actions, agent_work = self._prepare(goal)
+        recovery_callback = recover or (
+            lambda action, observation, attempt: self.action_builder.build_recovery_action(
+                plan, action, observation, attempt
+            )
+        )
         observations = []
         verifications = []
+        executed_actions: list[Action] = []
         for action in actions:
-            recovery_result = self.recovery.execute(plan, action, recover)
+            recovery_result = self.recovery.execute(plan, action, recovery_callback)
             final_observation = recovery_result.observations[-1]
             observations.append(final_observation)
             verifications.append(self.orchestrator.runtime.verify(final_observation))
+            executed_actions.extend(
+                attempt.replacement_action
+                for attempt in recovery_result.attempts
+                if attempt.replacement_action is not None
+            )
             if not final_observation.success:
                 break
 
@@ -120,4 +131,4 @@ class Daweling:
             verifications=verifications,
             agent_work=agent_work,
         )
-        return self._record_result(goal, result, actions)
+        return self._record_result(goal, result, actions + executed_actions)
