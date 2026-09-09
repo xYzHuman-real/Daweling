@@ -16,6 +16,8 @@ Daweling is intended to become an AI with its own model layer. The first impleme
 - A reproducible evaluation package with metric primitives and benchmark runners.
 - Evaluation regression checks for comparing current scores with a baseline.
 - Structured evaluation suites for aggregating benchmark groups and applying regression gates.
+- Weighted benchmark groups so important capabilities can contribute more to the aggregate score.
+- JSON-compatible evaluation report snapshots for experiment tracking.
 - An instruction-tuning dataset schema and trainer that masks prompt tokens from the training loss.
 - Instruction tuning can initialize from a compatible pretrained Daweling checkpoint and reports validation loss.
 - Instruction tuning saves both the final (`last`) checkpoint and the lowest-validation-loss (`best`) checkpoint when a validation split is available.
@@ -90,16 +92,25 @@ python -m model.cli data/daweling-instruct.best.pt "User: Explain photosynthesis
 The evaluation layer is deliberately model-interface agnostic. New benchmarks can be added without coupling them to a specific provider or model implementation.
 
 ```python
-from evaluation.runner import EvaluationExample, evaluate_exact_match
-from evaluation.regression import compare_scores
+from evaluation import BenchmarkSpec, run_suite
+from evaluation.benchmarks import BenchmarkCase
 
-examples = [EvaluationExample("2 + 2", "4")]
-report = evaluate_exact_match(my_model, examples)
-regression = compare_scores(0.80, report.score, threshold=0.02)
-print(report.score, regression.passed)
+suite = run_suite(
+    "core",
+    my_model,
+    [
+        BenchmarkSpec("math", [BenchmarkCase("add", "2 + 2", "4")], weight=2.0),
+        BenchmarkSpec("identity", [BenchmarkCase("name", "model", "Daweling")]),
+    ],
+    baseline_score=0.80,
+    regression_threshold=0.02,
+)
+
+print(suite.score)
+print(suite.to_dict())
 ```
 
-Structured suites can combine multiple benchmark groups and optionally compare their aggregate score with a baseline. A regression gate is a development safeguard, not evidence that the model is generally better; benchmark quality and held-out data still matter.
+Weighted suites prevent every benchmark group from automatically having equal importance. Reports can be converted to plain dictionaries for JSON experiment logs. A regression gate is a development safeguard, not evidence that the model is generally better; benchmark quality and held-out data still matter.
 
 ## Roadmap
 
