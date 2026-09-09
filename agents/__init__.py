@@ -9,6 +9,7 @@ from .pipeline import AgentPipeline, AgentPipelineResult
 from .registry import AgentRegistry
 from .research import ResearchAgent
 from .router import AgentRouter
+from .strategy import AgentStrategy, DynamicAgentRouter, StrategyCandidate, StrategySelection, StrategySelector
 
 __all__ = [
     "AgentCollaborator",
@@ -27,4 +28,9 @@ __all__ = [
     "ReviewDecision",
     "AgentRegistry",
     "ResearchAgent",
+    "AgentStrategy",
+    "DynamicAgentRouter",
+    "StrategyCandidate",
+    "StrategySelection",
+    "StrategySelector",
 ]
