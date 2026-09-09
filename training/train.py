@@ -23,6 +23,17 @@ def make_examples_from_texts(texts: tuple[str, ...], tokenizer: DawelingTokenize
     for text in texts: examples.extend(make_examples(text, tokenizer, sequence_length))
     return examples
 
+def _make_dataset_examples(texts: tuple[str, ...], tokenizer: DawelingTokenizer, sequence_length: int):
+    """Create independent windows without requiring every source to fill the global context length."""
+    examples: list[tuple[torch.Tensor, torch.Tensor]] = []
+    for text in texts:
+        token_count = len(tokenizer.encode(text, add_bos=False, add_eos=False))
+        if token_count < 2:
+            continue
+        local_length = min(sequence_length, token_count - 1)
+        examples.extend(make_examples(text, tokenizer, local_length))
+    return examples
+
 def make_batch(examples: list[tuple[torch.Tensor, torch.Tensor]], batch_size: int, step: int, *, seed: int = 0):
     if not examples: raise ValueError("examples must not be empty")
     if batch_size <= 0: raise ValueError("batch_size must be greater than zero")
@@ -65,7 +76,7 @@ def train(text_path: Path | None, output_path: Path, steps: int, learning_rate: 
     if dataset_path is None and text_path is None: raise ValueError("one of dataset_path or text_path is required")
     torch.manual_seed(seed); tokenizer = DawelingTokenizer(); config = ModelConfig(vocab_size=tokenizer.vocab_size); model = DawelingTransformer(config); optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     if dataset_path is not None:
-        partitions = load_partitions(dataset_path, validation_ratio=validation_ratio, seed=split_seed); examples = make_examples_from_texts(partitions.train_texts, tokenizer, config.max_sequence_length); validation_examples = make_examples_from_texts(partitions.validation_texts, tokenizer, config.max_sequence_length); dataset_sha256 = sha256_file(dataset_path); validation_sha256 = partitions.validation_sha256; split_config = {"validation_ratio": validation_ratio, "split_seed": split_seed, "train_examples": partitions.train_count, "validation_examples": partitions.validation_count, "train_sha256": partitions.train_sha256, "validation_sha256": validation_sha256}
+        partitions = load_partitions(dataset_path, validation_ratio=validation_ratio, seed=split_seed); examples = _make_dataset_examples(partitions.train_texts, tokenizer, config.max_sequence_length); validation_examples = _make_dataset_examples(partitions.validation_texts, tokenizer, config.max_sequence_length); dataset_sha256 = sha256_file(dataset_path); validation_sha256 = partitions.validation_sha256; split_config = {"validation_ratio": validation_ratio, "split_seed": split_seed, "train_examples": partitions.train_count, "validation_examples": partitions.validation_count, "train_sha256": partitions.train_sha256, "validation_sha256": validation_sha256, "windowing": "per_source_adaptive"}
     else:
         text = text_path.read_text(encoding="utf-8"); examples = list(make_examples(text, tokenizer, config.max_sequence_length)); validation_path = validation_text_path or text_path; validation_examples = list(make_examples(validation_path.read_text(encoding="utf-8"), tokenizer, config.max_sequence_length)); dataset_sha256 = DatasetManifest.load(dataset_manifest_path).output_sha256 if dataset_manifest_path else None; validation_sha256 = sha256_file(validation_path); split_config = {"legacy_text_inputs": True}
     if not examples: raise ValueError("training data is too short for the configured sequence length")
