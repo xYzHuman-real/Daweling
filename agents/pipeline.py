@@ -45,14 +45,14 @@ class AgentPipeline:
         planner: Planner | None = None,
         debate: AgentDebate | None = None,
         decision_engine: DecisionEngine | None = None,
-        review_required: bool = False,
+        review_required: bool | None = None,
     ) -> None:
         self.collaborator = collaborator
         self.runtime = runtime
         self.planner = planner or Planner()
         self.debate = debate
         self.decision_engine = decision_engine or DecisionEngine()
-        self.review_required = review_required
+        self.review_required = debate is not None if review_required is None else review_required
 
     def run(self, goal: Goal, action_builder: ActionBuilder) -> AgentPipelineResult:
         plan = self.planner.create_plan(goal)
