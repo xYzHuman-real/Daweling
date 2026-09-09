@@ -21,13 +21,32 @@ def make_examples(text: str, tokenizer: DawelingTokenizer, sequence_length: int)
         yield torch.tensor(chunk[:-1], dtype=torch.long), torch.tensor(chunk[1:], dtype=torch.long)
 
 
-def validation_loss(model: DawelingTransformer, examples: list[tuple[torch.Tensor, torch.Tensor]]) -> float:
+def make_batch(
+    examples: list[tuple[torch.Tensor, torch.Tensor]],
+    batch_size: int,
+    step: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build a deterministic mini-batch by cycling through prepared examples."""
+    if not examples:
+        raise ValueError("examples must not be empty")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+    indices = [(step * batch_size + offset) % len(examples) for offset in range(batch_size)]
+    inputs = torch.stack([examples[index][0] for index in indices])
+    targets = torch.stack([examples[index][1] for index in indices])
+    return inputs, targets
+
+
+def validation_loss(model: DawelingTransformer, examples: list[tuple[torch.Tensor, torch.Tensor]], batch_size: int = 1) -> float:
     model.eval()
     total = 0.0
     count = 0
     with torch.no_grad():
-        for input_ids, targets in examples:
-            _, loss = model(input_ids.unsqueeze(0), targets.unsqueeze(0))
+        for start in range(0, len(examples), batch_size):
+            batch = examples[start : start + batch_size]
+            input_ids = torch.stack([item[0] for item in batch])
+            targets = torch.stack([item[1] for item in batch])
+            _, loss = model(input_ids, targets)
             if loss is None:
                 raise RuntimeError("model did not return validation loss")
             tokens = targets.numel()
@@ -127,16 +146,16 @@ def train(
 
     for step in range(start_step, steps):
         model.train()
-        input_ids, targets = examples[step % len(examples)]
+        input_ids, targets = make_batch(examples, batch_size, step)
         optimizer.zero_grad(set_to_none=True)
-        _, loss = model(input_ids.unsqueeze(0), targets.unsqueeze(0))
+        _, loss = model(input_ids, targets)
         assert loss is not None
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         completed_step = step + 1
         if completed_step % validation_interval == 0 or completed_step == steps:
-            current_validation_loss = validation_loss(model, validation_examples)
+            current_validation_loss = validation_loss(model, validation_examples, batch_size)
             print(f"step={completed_step} train_loss={loss.item():.4f} validation_loss={current_validation_loss:.4f}")
             if best_validation_loss is None or current_validation_loss < best_validation_loss:
                 best_validation_loss = current_validation_loss
