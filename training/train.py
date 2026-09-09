@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -24,8 +25,8 @@ def make_examples(text: str, tokenizer: DawelingTokenizer, sequence_length: int)
         yield torch.tensor(chunk[:-1], dtype=torch.long), torch.tensor(chunk[1:], dtype=torch.long)
 
 
-def make_examples_from_rows(rows: list[dict[str, Any]], tokenizer: DawelingTokenizer, sequence_length: int):
-    return list(make_examples("\n".join(row["text"] for row in rows), tokenizer, sequence_length))
+def make_examples_from_texts(texts: tuple[str, ...], tokenizer: DawelingTokenizer, sequence_length: int):
+    return list(make_examples("\n".join(texts), tokenizer, sequence_length))
 
 
 def make_batch(examples: list[tuple[torch.Tensor, torch.Tensor]], batch_size: int, step: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -97,14 +98,11 @@ def train(text_path: Path | None, output_path: Path, steps: int, learning_rate: 
 
     if dataset_path is not None:
         partitions = load_partitions(dataset_path, validation_ratio=validation_ratio, seed=split_seed)
-        train_text = "\n".join(partitions.train_texts)
-        validation_text = "\n".join(partitions.validation_texts)
-        examples = list(make_examples(train_text, tokenizer, config.max_sequence_length))
-        validation_examples = list(make_examples(validation_text, tokenizer, config.max_sequence_length))
+        examples = make_examples_from_texts(partitions.train_texts, tokenizer, config.max_sequence_length)
+        validation_examples = make_examples_from_texts(partitions.validation_texts, tokenizer, config.max_sequence_length)
         dataset_sha256 = sha256_file(dataset_path)
-        import hashlib
-        validation_sha256 = hashlib.sha256(validation_text.encode("utf-8")).hexdigest()
-        split_config = {"validation_ratio": validation_ratio, "split_seed": split_seed, "train_examples": partitions.train_count, "validation_examples": partitions.validation_count, "validation_sha256": validation_sha256}
+        validation_sha256 = partitions.validation_sha256
+        split_config = {"validation_ratio": validation_ratio, "split_seed": split_seed, "train_examples": partitions.train_count, "validation_examples": partitions.validation_count, "train_sha256": partitions.train_sha256, "validation_sha256": validation_sha256}
     else:
         text = text_path.read_text(encoding="utf-8")
         examples = list(make_examples(text, tokenizer, config.max_sequence_length))
