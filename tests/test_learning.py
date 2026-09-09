@@ -47,3 +47,34 @@ def test_learning_engine_limits_results(tmp_path):
     context = LearningEngine(store, max_results=2).build("Build Daweling system")
 
     assert len(context.experiences) == 2
+
+
+def test_learning_engine_derives_actionable_guidance(tmp_path):
+    store = MemoryStore(tmp_path / "memory.json")
+    store.remember(
+        "experience:success",
+        {
+            "goal": "Build Daweling planner",
+            "success": True,
+            "tools_used": ["web_search", "echo"],
+            "recovery_diagnoses": [],
+        },
+        category="experience",
+    )
+    store.remember(
+        "experience:failure",
+        {
+            "goal": "Build Daweling planner",
+            "success": False,
+            "tools_used": ["fragile_tool"],
+            "recovery_diagnoses": ["Input contract was invalid"],
+        },
+        category="experience",
+    )
+
+    guidance = LearningEngine(store).build("Build Daweling planner").guidance()
+
+    assert guidance.preferred_tools == ("web_search", "echo")
+    assert guidance.avoid_tools == ("fragile_tool",)
+    assert guidance.lessons == ("Input contract was invalid",)
+    assert "preferred_tools" in guidance.as_prompt_context()
