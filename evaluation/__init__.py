@@ -6,6 +6,7 @@ from .experiment import ExperimentRecord, load_experiment, save_experiment
 from .history import BenchmarkDelta, ExperimentComparison, compare_experiment_files, compare_experiments
 from .instruction import InstructionCase, InstructionReport, InstructionResult, run_instruction_evaluation
 from .metrics import exact_match, mean_score, perplexity
+from .model_registry import ModelRegistry, ModelRegistryEntry, RegistrySnapshot
 from .model_suite import ModelEvaluationReport, evaluate_model
 from .reasoning import ReasoningCase, ReasoningReport, ReasoningResult, run_reasoning_evaluation
 from .reasoning_checkpoint import evaluate_reasoning_checkpoint, load_reasoning_checkpoint
@@ -27,10 +28,13 @@ __all__ = [
     "InstructionReport",
     "InstructionResult",
     "ModelEvaluationReport",
+    "ModelRegistry",
+    "ModelRegistryEntry",
     "ReasoningCase",
     "ReasoningRegressionReport",
     "ReasoningReport",
     "ReasoningResult",
+    "RegistrySnapshot",
     "RegressionReport",
     "ReleaseManifest",
     "compare_experiment_files",
