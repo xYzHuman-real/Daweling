@@ -11,6 +11,8 @@ import torch
 from data.manifest import DatasetManifest
 from model import DawelingTokenizer, ModelConfig, DawelingTransformer
 from training.experiment import TrainingRunManifest, make_run_id, sha256_file
+from training.metrics import perplexity
+from training.schedule import cosine_learning_rate
 
 
 def make_examples(text: str, tokenizer: DawelingTokenizer, sequence_length: int):
@@ -22,27 +24,23 @@ def make_examples(text: str, tokenizer: DawelingTokenizer, sequence_length: int)
 
 
 def make_batch(examples: list[tuple[torch.Tensor, torch.Tensor]], batch_size: int, step: int) -> tuple[torch.Tensor, torch.Tensor]:
-    """Build a deterministic mini-batch by cycling through prepared examples."""
     if not examples:
         raise ValueError("examples must not be empty")
     if batch_size <= 0:
         raise ValueError("batch_size must be greater than zero")
     indices = [(step * batch_size + offset) % len(examples) for offset in range(batch_size)]
-    inputs = torch.stack([examples[index][0] for index in indices])
-    targets = torch.stack([examples[index][1] for index in indices])
-    return inputs, targets
+    return torch.stack([examples[i][0] for i in indices]), torch.stack([examples[i][1] for i in indices])
 
 
 def validation_loss(model: DawelingTransformer, examples: list[tuple[torch.Tensor, torch.Tensor]], batch_size: int = 1) -> float:
     model.eval()
-    total = 0.0
-    count = 0
+    total = count = 0
     with torch.no_grad():
         for start in range(0, len(examples), batch_size):
-            batch = examples[start : start + batch_size]
-            input_ids = torch.stack([item[0] for item in batch])
+            batch = examples[start:start + batch_size]
+            inputs = torch.stack([item[0] for item in batch])
             targets = torch.stack([item[1] for item in batch])
-            _, loss = model(input_ids, targets)
+            _, loss = model(inputs, targets)
             if loss is None:
                 raise RuntimeError("model did not return validation loss")
             tokens = targets.numel()
@@ -59,53 +57,33 @@ def _load_resume(path: Path, model: DawelingTransformer, optimizer: torch.optim.
         raise ValueError("resume checkpoint is invalid")
     if checkpoint.get("format_version", 1) < 4:
         raise ValueError("resume checkpoint does not contain deterministic training state; retrain from a format 4 checkpoint")
-    raw_config = checkpoint.get("config")
-    if raw_config != model.config.__dict__:
+    if checkpoint.get("config") != model.config.__dict__:
         raise ValueError("resume checkpoint model configuration does not match the current model")
     model.load_state_dict(checkpoint["state_dict"])
     optimizer_state = checkpoint.get("optimizer_state_dict")
-    if not isinstance(optimizer_state, dict):
-        raise ValueError("resume checkpoint is missing optimizer state")
-    optimizer.load_state_dict(optimizer_state)
     rng_state = checkpoint.get("rng_state")
-    if not isinstance(rng_state, torch.Tensor):
-        raise ValueError("resume checkpoint is missing RNG state")
+    if not isinstance(optimizer_state, dict) or not isinstance(rng_state, torch.Tensor):
+        raise ValueError("resume checkpoint is missing deterministic optimizer or RNG state")
+    optimizer.load_state_dict(optimizer_state)
     torch.set_rng_state(rng_state)
     return checkpoint
 
 
-def _save_checkpoint(path: Path, model: DawelingTransformer, optimizer: torch.optim.Optimizer, *, step: int, run_id: str, seed: int, config: dict[str, Any], training_config: dict[str, Any], dataset_manifest: str | None, dataset_sha256: str | None, best_validation_loss: float | None, best_step: int | None, parent_checkpoint: str | None) -> None:
+def _save_checkpoint(path: Path, model: DawelingTransformer, optimizer: torch.optim.Optimizer, *, step: int, run_id: str, seed: int, config: dict[str, Any], training_config: dict[str, Any], dataset_manifest: str | None, dataset_sha256: str | None, validation_text_sha256: str | None, best_validation_loss: float | None, best_step: int | None, parent_checkpoint: str | None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({
-        "format_version": 4,
-        "config": config,
-        "state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "rng_state": torch.get_rng_state(),
-        "step": step,
-        "stage": "pretraining",
-        "run_id": run_id,
-        "seed": seed,
-        "training_config": training_config,
-        "dataset_manifest": dataset_manifest,
-        "dataset_sha256": dataset_sha256,
-        "best_validation_loss": best_validation_loss,
-        "best_step": best_step,
-        "parent_checkpoint": parent_checkpoint,
-    }, path)
+    torch.save({"format_version": 4, "config": config, "state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "rng_state": torch.get_rng_state(), "step": step, "stage": "pretraining", "run_id": run_id, "seed": seed, "training_config": training_config, "dataset_manifest": dataset_manifest, "dataset_sha256": dataset_sha256, "validation_text_sha256": validation_text_sha256, "best_validation_loss": best_validation_loss, "best_step": best_step, "parent_checkpoint": parent_checkpoint}, path)
 
 
-def train(text_path: Path, output_path: Path, steps: int, learning_rate: float, *, seed: int = 0, dataset_manifest_path: Path | None = None, validation_text_path: Path | None = None, batch_size: int = 1, validation_interval: int = 10, resume_from: Path | None = None, best_output_path: Path | None = None) -> TrainingRunManifest:
-    """Train to a target step count, periodically checkpoint, and optionally resume deterministically."""
+def train(text_path: Path, output_path: Path, steps: int, learning_rate: float, *, seed: int = 0, dataset_manifest_path: Path | None = None, validation_text_path: Path | None = None, batch_size: int = 1, validation_interval: int = 10, resume_from: Path | None = None, best_output_path: Path | None = None, warmup_steps: int = 0, min_learning_rate: float = 0.0) -> TrainingRunManifest:
     if steps <= 0 or batch_size <= 0 or validation_interval <= 0:
         raise ValueError("steps, batch_size, and validation_interval must be greater than zero")
+    if warmup_steps < 0 or warmup_steps >= steps:
+        raise ValueError("warmup_steps must be non-negative and smaller than steps")
     torch.manual_seed(seed)
-
     tokenizer = DawelingTokenizer()
     config = ModelConfig(vocab_size=tokenizer.vocab_size)
     model = DawelingTransformer(config)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-
     text = text_path.read_text(encoding="utf-8")
     examples = list(make_examples(text, tokenizer, config.max_sequence_length))
     if not examples:
@@ -114,16 +92,13 @@ def train(text_path: Path, output_path: Path, steps: int, learning_rate: float, 
     validation_examples = list(make_examples(validation_path.read_text(encoding="utf-8"), tokenizer, config.max_sequence_length))
     if not validation_examples:
         raise ValueError("validation text is too short for the configured sequence length")
-
     dataset_sha256 = DatasetManifest.load(dataset_manifest_path).output_sha256 if dataset_manifest_path else None
     validation_sha256 = sha256_file(validation_path)
-    training_config = {"steps": steps, "learning_rate": learning_rate, "sequence_length": config.max_sequence_length, "optimizer": "AdamW", "gradient_clip_norm": 1.0, "batch_size": batch_size, "validation_interval": validation_interval}
+    training_config = {"steps": steps, "learning_rate": learning_rate, "min_learning_rate": min_learning_rate, "warmup_steps": warmup_steps, "schedule": "warmup_cosine", "sequence_length": config.max_sequence_length, "optimizer": "AdamW", "gradient_clip_norm": 1.0, "batch_size": batch_size, "validation_interval": validation_interval}
     model_config = config.__dict__
     run_id = make_run_id(stage="pretraining", dataset_sha256=dataset_sha256, model_config=model_config, training_config=training_config, seed=seed)
-
     start_step = 0
-    best_validation_loss: float | None = None
-    best_step: int | None = None
+    best_validation_loss = best_step = None
     parent_checkpoint = str(resume_from) if resume_from else None
     if resume_from is not None:
         resumed = _load_resume(resume_from, model, optimizer)
@@ -134,37 +109,32 @@ def train(text_path: Path, output_path: Path, steps: int, learning_rate: float, 
             raise ValueError("resume checkpoint run_id does not match the current training configuration")
         if resumed.get("dataset_sha256") != dataset_sha256:
             raise ValueError("resume checkpoint dataset identity does not match the current dataset")
-        resumed_validation_sha256 = resumed.get("validation_text_sha256")
-        if resumed_validation_sha256 is not None and resumed_validation_sha256 != validation_sha256:
+        if resumed.get("validation_text_sha256") not in (None, validation_sha256):
             raise ValueError("resume checkpoint validation dataset does not match the current validation text")
-        best_validation_loss = resumed.get("best_validation_loss")
-        best_step = resumed.get("best_step")
-        print(f"resuming from step={start_step}")
-
+        best_validation_loss, best_step = resumed.get("best_validation_loss"), resumed.get("best_step")
     for step in range(start_step, steps):
+        current_lr = cosine_learning_rate(learning_rate, step, steps, warmup_steps=warmup_steps, min_learning_rate=min_learning_rate)
+        for group in optimizer.param_groups:
+            group["lr"] = current_lr
         model.train()
-        input_ids, targets = make_batch(examples, batch_size, step)
+        inputs, targets = make_batch(examples, batch_size, step)
         optimizer.zero_grad(set_to_none=True)
-        _, loss = model(input_ids, targets)
+        _, loss = model(inputs, targets)
         assert loss is not None
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
-        completed_step = step + 1
-        if completed_step % validation_interval == 0 or completed_step == steps:
-            current_validation_loss = validation_loss(model, validation_examples, batch_size)
-            print(f"step={completed_step} train_loss={loss.item():.4f} validation_loss={current_validation_loss:.4f}")
-            if best_validation_loss is None or current_validation_loss < best_validation_loss:
-                best_validation_loss = current_validation_loss
-                best_step = completed_step
-                _save_checkpoint(best_output_path or output_path.with_suffix(output_path.suffix + ".best.pt"), model, optimizer, step=completed_step, run_id=run_id, seed=seed, config=model_config, training_config=training_config, dataset_manifest=str(dataset_manifest_path) if dataset_manifest_path else None, dataset_sha256=dataset_sha256, best_validation_loss=best_validation_loss, best_step=best_step, parent_checkpoint=parent_checkpoint)
-        if completed_step % validation_interval == 0 or completed_step == steps:
-            _save_checkpoint(output_path, model, optimizer, step=completed_step, run_id=run_id, seed=seed, config=model_config, training_config=training_config, dataset_manifest=str(dataset_manifest_path) if dataset_manifest_path else None, dataset_sha256=dataset_sha256, best_validation_loss=best_validation_loss, best_step=best_step, parent_checkpoint=parent_checkpoint)
-
+        completed = step + 1
+        if completed % validation_interval == 0 or completed == steps:
+            val_loss = validation_loss(model, validation_examples, batch_size)
+            print(f"step={completed} lr={current_lr:.6g} train_loss={loss.item():.4f} train_ppl={perplexity(float(loss.item())):.2f} validation_loss={val_loss:.4f} validation_ppl={perplexity(val_loss):.2f}")
+            if best_validation_loss is None or val_loss < best_validation_loss:
+                best_validation_loss, best_step = val_loss, completed
+                _save_checkpoint(best_output_path or output_path.with_suffix(output_path.suffix + ".best.pt"), model, optimizer, step=completed, run_id=run_id, seed=seed, config=model_config, training_config=training_config, dataset_manifest=str(dataset_manifest_path) if dataset_manifest_path else None, dataset_sha256=dataset_sha256, validation_text_sha256=validation_sha256, best_validation_loss=best_validation_loss, best_step=best_step, parent_checkpoint=parent_checkpoint)
+            _save_checkpoint(output_path, model, optimizer, step=completed, run_id=run_id, seed=seed, config=model_config, training_config=training_config, dataset_manifest=str(dataset_manifest_path) if dataset_manifest_path else None, dataset_sha256=dataset_sha256, validation_text_sha256=validation_sha256, best_validation_loss=best_validation_loss, best_step=best_step, parent_checkpoint=parent_checkpoint)
     lineage = TrainingRunManifest(run_id=run_id, stage="pretraining", dataset_manifest=str(dataset_manifest_path) if dataset_manifest_path else None, dataset_sha256=dataset_sha256, model_config=model_config, training_config=training_config, seed=seed, checkpoint_path=str(output_path), checkpoint_sha256=sha256_file(output_path), parent_checkpoint=parent_checkpoint, metadata={"training_text_sha256": sha256_file(text_path), "validation_text_sha256": validation_sha256}, last_step=steps, best_validation_loss=best_validation_loss, best_step=best_step)
     lineage.save(output_path.with_suffix(output_path.suffix + ".manifest.json"))
     print(f"saved checkpoint: {output_path}")
-    print(f"saved run manifest: {output_path.with_suffix(output_path.suffix + '.manifest.json')}")
     return lineage
 
 
@@ -181,5 +151,7 @@ if __name__ == "__main__":
     parser.add_argument("--validation-interval", type=int, default=10)
     parser.add_argument("--resume-from", type=Path, default=None)
     parser.add_argument("--best-output", type=Path, default=None)
+    parser.add_argument("--warmup-steps", type=int, default=0)
+    parser.add_argument("--min-learning-rate", type=float, default=0.0)
     args = parser.parse_args()
-    train(args.text, args.output, args.steps, args.learning_rate, seed=args.seed, dataset_manifest_path=args.dataset_manifest, validation_text_path=args.validation_text, batch_size=args.batch_size, validation_interval=args.validation_interval, resume_from=args.resume_from, best_output_path=args.best_output)
+    train(args.text, args.output, args.steps, args.learning_rate, seed=args.seed, dataset_manifest_path=args.dataset_manifest, validation_text_path=args.validation_text, batch_size=args.batch_size, validation_interval=args.validation_interval, resume_from=args.resume_from, best_output_path=args.best_output, warmup_steps=args.warmup_steps, min_learning_rate=args.min_learning_rate)
