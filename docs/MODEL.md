@@ -15,7 +15,7 @@ The repository contains a dependency-light PyTorch implementation with:
 - dataset validation and cleaning
 - deterministic dataset splitting
 - reproducible training-run manifests
-- deterministic token batching
+- resumable optimizer/model checkpoints
 - validation-loss measurement
 - benchmark and regression evaluation
 - checkpoint selection
@@ -25,8 +25,6 @@ The default small experiment is intentionally modest: 4 Transformer blocks, 4 at
 This is **not a frontier model**. It is the foundation for building Daweling's own training, evaluation, data, and inference stack.
 
 ## Reproducible training pipeline
-
-The intended development loop is:
 
 ```text
 raw dataset
@@ -43,7 +41,9 @@ training
     ↓
 periodic validation loss
     ↓
-checkpoint + training-run manifest
+checkpoint + optimizer state
+    ↓
+resumable run manifest
     ↓
 benchmark evaluation
     ↓
@@ -72,18 +72,32 @@ For a separate validation corpus:
 python -m training.train corpus.txt --validation-text validation.txt --output data/daweling-small.pt --steps 100 --batch-size 4 --validation-interval 10
 ```
 
-If a prepared dataset manifest is available, pass it with `--dataset-manifest`. The resulting checkpoint receives a sidecar training manifest containing the dataset fingerprint, model configuration, training configuration, seed, checkpoint fingerprint, and source text fingerprints.
+The trainer periodically evaluates validation loss and writes the latest resumable checkpoint. Whenever validation improves, it also writes a `.best.pt` checkpoint. The best checkpoint is selected by lowest validation loss rather than final training loss.
+
+### Resume training
+
+A checkpoint contains the model state, AdamW optimizer state, completed step, run ID, seed, dataset fingerprint, configuration, and best-validation state.
+
+Resume to a larger target step count with:
+
+```bash
+python -m training.train corpus.txt --output data/daweling-small.pt --steps 1000 --resume-from data/daweling-small.pt --seed 0
+```
+
+The trainer rejects a resume when the model configuration or deterministic run identity does not match. This prevents silently continuing an experiment with incompatible settings.
+
+The sidecar manifest (`.manifest.json`) records the final step, best validation loss, best step, checkpoint fingerprint, and parent checkpoint when a run is resumed.
 
 ## Validation
 
-`training.validation.evaluate_loss` computes token-weighted mean cross-entropy over validation batches without changing model weights. Validation loss is kept separate from training loss so experiments can detect overfitting instead of selecting checkpoints only from the final training step.
+Validation loss is computed with `training.train.validation_loss` using token-weighted mean cross-entropy and no gradient updates. Keeping validation separate from optimization makes overfitting visible and gives checkpoint selection a reproducible objective.
 
 ## Experiment lineage
 
-`training.experiment.TrainingRunManifest` provides a stable machine-readable link between:
+`training.experiment.TrainingRunManifest` provides a machine-readable link between:
 
 ```text
-dataset → configuration → seed → checkpoint
+dataset → configuration → seed → checkpoint → resume history
 ```
 
 Run IDs are derived deterministically from the stage, dataset fingerprint, model configuration, training configuration, and seed. This makes repeated experiments comparable and makes accidental configuration drift visible.
