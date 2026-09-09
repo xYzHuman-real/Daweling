@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
+from core.policy import ToolRisk
+
 
 @dataclass(frozen=True)
 class ToolResult:
@@ -28,6 +30,7 @@ class BaseTool(ABC):
 
     name: str = ""
     description: str = ""
+    risk_level: ToolRisk = ToolRisk.SAFE
 
     @abstractmethod
     def run(self, input_data: Dict[str, Any]) -> ToolResult:
