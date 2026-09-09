@@ -39,11 +39,7 @@ def make_batch(
     *,
     seed: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return a deterministic shuffled mini-batch.
-
-    A fresh permutation is created per epoch, making training less sensitive to
-    the original dataset ordering while keeping exact reproducibility on resume.
-    """
+    """Return a deterministic shuffled mini-batch."""
     if not examples:
         raise ValueError("examples must not be empty")
     if batch_size <= 0:
@@ -171,11 +167,16 @@ def train(text_path: Path | None, output_path: Path, steps: int, learning_rate: 
         assert loss is not None
         (loss / gradient_accumulation_steps).backward()
         completed = step + 1
-        if completed % gradient_accumulation_steps == 0 or completed == steps:
+        optimizer_step = completed % gradient_accumulation_steps == 0 or completed == steps
+        if optimizer_step:
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
-        if completed % validation_interval == 0 or completed == steps:
+        # Checkpoints are only created immediately after an optimizer step.
+        # This prevents resumable checkpoints from silently losing partial
+        # gradient-accumulation state and changing the training trajectory.
+        should_validate = optimizer_step and (completed % validation_interval == 0 or completed == steps)
+        if should_validate:
             val_loss = validation_loss(model, validation_examples, batch_size)
             print(f"step={completed} lr={current_lr:.6g} train_loss={loss.item():.4f} train_ppl={perplexity(float(loss.item())):.2f} validation_loss={val_loss:.4f} validation_ppl={perplexity(val_loss):.2f} examples_seen={completed * batch_size}")
             if best_validation_loss is None or val_loss < best_validation_loss:
