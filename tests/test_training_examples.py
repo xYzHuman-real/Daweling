@@ -1,5 +1,3 @@
-import torch
-
 from model import DawelingTokenizer
 from training.train import make_examples_from_texts
 
@@ -7,15 +5,11 @@ from training.train import make_examples_from_texts
 def test_dataset_examples_do_not_cross_boundaries():
     tokenizer = DawelingTokenizer()
     sequence_length = 4
-    first = "abcdefghij"
-    second = "KLMNOPQRST"
 
-    examples = make_examples_from_texts((first, second), tokenizer, sequence_length)
-    second_ids = tokenizer.encode(second)
-
-    # Every produced target sequence must originate inside one source example.
-    second_start = tuple(second_ids[1:sequence_length + 1])
-    assert all(not torch.equal(target, torch.tensor(second_start, dtype=torch.long)) for _, target in examples if target.numel() == sequence_length)
+    # Each source is exactly four UTF-8 bytes. With BOS/EOS, neither source
+    # contains enough tokens for a full window; joining them would incorrectly
+    # manufacture a window spanning the two sources.
+    assert make_examples_from_texts(("abcd", "WXYZ"), tokenizer, sequence_length) == []
 
 
 def test_empty_or_short_dataset_examples_are_skipped():
