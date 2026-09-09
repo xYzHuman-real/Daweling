@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +25,15 @@ def make_examples(text: str, tokenizer: DawelingTokenizer, sequence_length: int)
 
 
 def make_examples_from_texts(texts: tuple[str, ...], tokenizer: DawelingTokenizer, sequence_length: int):
-    return list(make_examples("\n".join(texts), tokenizer, sequence_length))
+    """Create training windows independently for each dataset example.
+
+    Examples are never joined together, so a sequence cannot cross from the end
+    of one source example into the beginning of another source example.
+    """
+    examples: list[tuple[torch.Tensor, torch.Tensor]] = []
+    for text in texts:
+        examples.extend(make_examples(text, tokenizer, sequence_length))
+    return examples
 
 
 def make_batch(examples: list[tuple[torch.Tensor, torch.Tensor]], batch_size: int, step: int) -> tuple[torch.Tensor, torch.Tensor]:
