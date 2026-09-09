@@ -21,16 +21,19 @@ OBSERVE
   ↓
 VERIFY
   ↓
-DEBATE / REVIEW
-  ↓
-RECOVER / REPLAN
+DECIDE
+  ├── REVIEW ──→ DECIDE
+  ├── RECOVER ─→ DECIDE
+  ├── REPLAN ──→ DECIDE
+  ├── COMPLETE
+  └── FAIL
   ↓
 RESPOND / CONTINUE
   ↓
 LEARN
 ```
 
-Important work products can be independently challenged before acceptance. Review is bounded and does not replace the runtime's verification layer.
+The control plane is deterministic and evidence-driven. Models and agents can produce evidence, plans, and work products, but they do not directly override workflow safety policy.
 
 ## 3. Proposed modules
 
@@ -52,10 +55,12 @@ Owns workflow execution and coordinates agents and tools.
 
 Responsibilities:
 - Create execution plans.
-- Select the next action.
-- Track state.
+- Select the next workflow stage.
+- Track state and decision reasons.
 - Handle failures, recovery, and verification.
 - Enforce approval boundaries.
+
+`orchestrator/decision.py` provides the unified decision layer. `DecisionEngine` selects one of `EXECUTE`, `REVIEW`, `RECOVER`, `REPLAN`, `COMPLETE`, or `FAIL` from explicit workflow evidence and bounded budgets.
 
 ### `agents`
 Specialized capabilities exposed through a common interface.
@@ -119,14 +124,16 @@ The exact interface will be implemented in the foundation code and expanded as r
 
 Autonomy must be proportional to risk. Informational actions can be automated more freely, while consequential external actions should require explicit approval or a clearly configured policy.
 
-Recovery, replanning, collaboration, and peer review remain bounded and preserve the same runtime approval boundaries as normal execution.
+Recovery, replanning, collaboration, peer review, and decision-making remain bounded and preserve the same runtime approval boundaries as normal execution.
+
+The decision engine is intentionally policy-first rather than model-first: a model may recommend a recovery or replan, but the control plane decides whether that transition is permitted by the configured budget and evidence.
 
 The runtime should make actions auditable rather than hiding them inside a single opaque model call.
 
 ## 6. Current executable milestone
 
-The execution path now supports:
+The execution foundation now supports:
 
-**Goal → Task Plan → Multi-Agent Collaboration → Tool Interface → Observation → Verification → Peer Review → Recovery → Adaptive Replan → Learning**
+**Goal → Task Plan → Multi-Agent Collaboration → Tool Interface → Observation → Verification → Deterministic Decision → Peer Review → Recovery → Adaptive Replan → Learning**
 
-This provides the foundation for progressively more capable agents without redesigning the entire project.
+The next integration step is to let the decision engine drive bounded recovery and adaptive replanning loops end-to-end rather than exposing those capabilities only as separate APIs.
