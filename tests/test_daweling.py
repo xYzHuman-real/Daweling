@@ -3,6 +3,7 @@ from daweling import Daweling
 from models import ModelMessage, ModelProvider, ModelResponse
 from tools.base import BaseTool, ToolResult
 from tools.registry import ToolRegistry
+from agents import AgentRegistry
 
 
 class ScriptedProvider(ModelProvider):
@@ -38,16 +39,12 @@ class RecoverableTool(BaseTool):
 
 
 def test_daweling_runs_model_to_verified_result():
-    provider = ScriptedProvider(
-        [
-            '{"tasks":[{"id":"task-1","description":"Say hello"}]}',
-            '{"actions":[{"task_id":"task-1","tool":"echo","input":{"message":"hello from Daweling"}}]}',
-        ]
-    )
+    provider = ScriptedProvider([
+        '{"tasks":[{"id":"task-1","description":"Say hello"}]}',
+        '{"actions":[{"task_id":"task-1","tool":"echo","input":{"message":"hello from Daweling"}}]}',
+    ])
     daweling = Daweling(provider, ToolRegistry([EchoTool()]))
-
     result = daweling.run(Goal("Say hello"))
-
     assert result.success is True
     assert result.observations[0].output == "hello from Daweling"
     assert result.verifications[0].valid is True
@@ -55,14 +52,11 @@ def test_daweling_runs_model_to_verified_result():
 
 
 def test_daweling_keeps_model_selection_separate_from_execution():
-    provider = ScriptedProvider(
-        [
-            '{"tasks":[{"id":"task-1","description":"Do work"}]}',
-            '{"actions":[{"task_id":"task-1","tool":"missing","input":{}}]}',
-        ]
-    )
+    provider = ScriptedProvider([
+        '{"tasks":[{"id":"task-1","description":"Do work"}]}',
+        '{"actions":[{"task_id":"task-1","tool":"missing","input":{}}]}',
+    ])
     daweling = Daweling(provider, ToolRegistry([EchoTool()]))
-
     try:
         daweling.run(Goal("Do work"))
     except ValueError as exc:
@@ -72,24 +66,31 @@ def test_daweling_keeps_model_selection_separate_from_execution():
 
 
 def test_daweling_can_recover_from_a_failed_tool_action():
-    provider = ScriptedProvider(
-        [
-            '{"tasks":[{"id":"task-1","description":"Recover"}]}',
-            '{"actions":[{"task_id":"task-1","tool":"recoverable","input":{"message":"first"}}]}',
-        ]
-    )
+    provider = ScriptedProvider([
+        '{"tasks":[{"id":"task-1","description":"Recover"}]}',
+        '{"actions":[{"task_id":"task-1","tool":"recoverable","input":{"message":"first"}}]}',
+    ])
     tool = RecoverableTool()
     daweling = Daweling(provider, ToolRegistry([tool]))
-
     result = daweling.run_with_recovery(
         Goal("Recover"),
-        lambda action, _observation, _attempt: Action(
-            action.task_id,
-            action.tool,
-            {"message": "recovered"},
-        ),
+        lambda action, _observation, _attempt: Action(action.task_id, action.tool, {"message": "recovered"}),
     )
-
     assert result.success is True
     assert result.observations[0].output == "recovered"
     assert tool.calls == 2
+
+
+def test_daweling_autonomous_loop_uses_model_recovery():
+    provider = ScriptedProvider([
+        '{"tasks":[{"id":"task-1","description":"Recover a failed operation"}]}',
+        '{"actions":[{"task_id":"task-1","tool":"recoverable","input":{"message":"first"}}]}',
+        '{"diagnosis":"The first attempt used an input that triggers the temporary failure.","action":{"task_id":"task-1","tool":"recoverable","input":{"message":"recovered"}}}',
+    ])
+    tool = RecoverableTool()
+    daweling = Daweling(provider, ToolRegistry([tool]), agent_registry=AgentRegistry([]))
+    result = daweling.run_autonomous(Goal("Recover a failed operation"))
+    assert result.success is True
+    assert result.observations[0].output == "recovered"
+    assert tool.calls == 2
+    assert len(provider.messages) == 3
