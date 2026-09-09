@@ -13,6 +13,7 @@ from .benchmarks import BenchmarkCase
 from .checkpoint_evaluator import evaluate_checkpoint
 from .checkpoint_selection import CheckpointSelection, select_checkpoint
 from .experiment import ExperimentRecord
+from .model_registry import ModelRegistry
 from .release_manifest import ReleaseManifest
 from .suites import BenchmarkSpec
 
@@ -30,8 +31,9 @@ def evaluate_and_select_checkpoints(
     metadata: dict | None = None,
     training_manifest_path: str | Path | None = None,
     release_manifest_path: str | Path | None = None,
+    model_registry_path: str | Path | None = None,
 ) -> CheckpointSelection:
-    """Evaluate every candidate, persist results, and create an auditable release manifest."""
+    """Evaluate candidates, persist results, select a winner, and optionally promote it."""
     paths = tuple(Path(path) for path in checkpoints)
     if not paths:
         raise ValueError("at least one checkpoint is required")
@@ -77,6 +79,14 @@ def evaluate_and_select_checkpoints(
         lambda path: records[path],
         require_regression_pass=require_regression_pass,
     )
+
+    if model_registry_path is not None:
+        selected = selection.selected
+        ModelRegistry(model_registry_path).register(
+            selected.path,
+            selected.experiment,
+            require_regression_pass=require_regression_pass,
+        )
 
     if release_manifest_path is not None:
         selected = selection.selected
