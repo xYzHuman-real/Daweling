@@ -8,7 +8,7 @@ from core.runtime import Runtime
 from memory import ExperienceRecorder, MemoryStore
 from memory.context import ContextEngine
 from models import ModelProvider
-from orchestrator import DecisionDrivenLoop, ExecutionResult, NextStep, Orchestrator
+from orchestrator import DecisionDrivenLoop, ExecutionResult, Orchestrator
 from planner import AdaptivePlanner
 from planner.model_action_builder import ModelActionBuilder
 from planner.model_planner import ModelPlanner
@@ -22,9 +22,8 @@ class Daweling:
 
     def __init__(self, provider: ModelProvider, registry: ToolRegistry | None = None,
                  memory: MemoryStore | None = None, agent_registry: AgentRegistry | None = None,
-                 approval_policy: ApprovalPolicy | None = None,
-                 capability_config: CapabilityConfig | None = None, max_recovery_attempts: int = 2,
-                 max_replan_rounds: int = 2) -> None:
+                 approval_policy: ApprovalPolicy | None = None, capability_config: CapabilityConfig | None = None,
+                 max_recovery_attempts: int = 2, max_replan_rounds: int = 2) -> None:
         self.provider = provider
         self.registry = registry or ToolRegistry()
         self.memory = memory or MemoryStore()
@@ -39,12 +38,9 @@ class Daweling:
         self._configure_capabilities(capability_config or CapabilityConfig.from_env())
         runtime = Runtime(self.registry, approval_policy=approval_policy)
         self.orchestrator = Orchestrator(planner=self.planner, runtime=runtime)
-        self.loop = DecisionDrivenLoop(
-            runtime,
-            planner=self.planner,
-            max_recovery_attempts=max_recovery_attempts,
-            max_replan_rounds=max_replan_rounds,
-        )
+        self.loop = DecisionDrivenLoop(runtime, planner=self.planner,
+                                       max_recovery_attempts=max_recovery_attempts,
+                                       max_replan_rounds=max_replan_rounds)
         self.max_recovery_attempts = max_recovery_attempts
         self.max_replan_rounds = max_replan_rounds
 
@@ -67,9 +63,8 @@ class Daweling:
         self.experience_recorder.record(
             goal=goal.description, success=result.success, verifications=result.verifications,
             task_count=len(result.plan.tasks), successful_tasks=sum(o.success for o in result.observations),
-            failed_tasks=sum(not o.success for o in result.observations),
-            tools_used=[a.tool for a in actions], recovery_diagnoses=list(diagnoses),
-            recovery_attempts=len(diagnoses),
+            failed_tasks=sum(not o.success for o in result.observations), tools_used=[a.tool for a in actions],
+            recovery_diagnoses=list(diagnoses), recovery_attempts=len(diagnoses),
         )
         return result
 
@@ -80,63 +75,48 @@ class Daweling:
         return self._record_result(goal, ExecutionResult(plan, observations, verifications, agent_work), actions)
 
     def run_with_recovery(self, goal: Goal, recover: RecoveryCallback | None = None) -> ExecutionResult:
-        """Run with bounded model-guided recovery and adaptive replanning."""
-        plan, actions, agent_work = self._prepare(goal)
-        current_actions = actions
-        observations = []
-        verifications = []
-        executed_actions = list(actions)
-        diagnoses = []
-        recovery_attempts = 0
-        replan_rounds = 0
+        """Run the complete bounded control loop with model-guided recovery and replanning."""
+        plan, _, agent_work = self._prepare(goal)
+        executed_actions: list[Action] = []
+        diagnoses: list[str] = []
 
-        while True:
-            observations = self.orchestrator.runtime.execute(plan, current_actions)
-            verifications = [self.orchestrator.runtime.verify(o) for o in observations]
-            if all(item.valid for item in verifications) and verifications:
-                result = ExecutionResult(plan, observations, verifications, agent_work)
-                return self._record_result(goal, result, executed_actions, diagnoses)
+        def build_actions(current_plan):
+            executions = self.agent_executor.execute(current_plan, context=agent_work)
+            refreshed_work = self.agent_executor.as_action_context(executions)
+            agent_work.clear()
+            agent_work.update(refreshed_work)
+            actions = self.action_builder.build_actions(current_plan, agent_context=agent_work)
+            executed_actions.extend(actions)
+            return actions
 
-            failed_index = next((i for i, item in enumerate(verifications) if not item.valid), None)
-            if failed_index is None:
-                result = ExecutionResult(plan, observations, verifications, agent_work)
-                return self._record_result(goal, result, executed_actions, diagnoses)
-
-            failed_action = current_actions[failed_index]
-            failed_observation = observations[failed_index]
-            if recovery_attempts < self.max_recovery_attempts:
-                if recover is not None:
-                    replacement = recover(failed_action, failed_observation, recovery_attempts + 1)
-                    diagnosis = "Custom recovery callback"
-                else:
-                    decision = self.action_builder.build_recovery_action_with_diagnosis(
-                        plan, failed_action, failed_observation, recovery_attempts + 1
-                    )
-                    replacement = decision.action
-                    diagnosis = decision.diagnosis
-                recovery_attempts += 1
-                diagnoses.append(diagnosis)
+        def recover_action(current_plan, action, observation):
+            attempt = sum(1 for _ in diagnoses) + 1
+            if recover is not None:
+                replacement = recover(action, observation, attempt)
                 if replacement is not None:
-                    current_actions = list(current_actions)
-                    current_actions[failed_index] = replacement
-                    executed_actions.append(replacement)
-                    continue
+                    diagnoses.append("Custom recovery callback")
+                return replacement
+            decision = self.action_builder.build_recovery_action_with_diagnosis(
+                current_plan, action, observation, attempt
+            )
+            diagnoses.append(decision.diagnosis)
+            return decision.action
 
-            if replan_rounds < self.max_replan_rounds:
-                replanned = self.adaptive_planner.replan(
-                    plan, observations, verifications, current_actions
-                )
-                plan = replanned.plan
-                replan_rounds += 1
-                recovery_attempts = 0
-                current_actions = self.action_builder.build_actions(plan, agent_context=agent_work)
-                self.orchestrator.validate_actions(plan, current_actions)
-                executed_actions.extend(current_actions)
-                continue
+        def replan(current_plan, observations, verifications, actions):
+            return self.adaptive_planner.replan(
+                current_plan, observations, verifications, actions
+            ).plan
 
-            result = ExecutionResult(plan, observations, verifications, agent_work)
-            return self._record_result(goal, result, executed_actions, diagnoses)
+        loop_result = self.loop.run(
+            goal,
+            build_actions,
+            initial_plan=plan,
+            recover=recover_action,
+            replan=replan,
+        )
+        result = ExecutionResult(loop_result.plan, loop_result.observations, loop_result.verifications, agent_work)
+        return self._record_result(goal, result, executed_actions, diagnoses)
 
     def run_autonomous(self, goal: Goal) -> ExecutionResult:
-        """Run the model-guided recovery/replanning control loop end to end."""
+        """Run Daweling's model-guided recovery/replanning control loop end to end."""
         return self.run_with_recovery(goal)
