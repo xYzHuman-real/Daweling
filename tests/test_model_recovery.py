@@ -34,28 +34,22 @@ def test_model_recovery_diagnoses_failure_and_changes_input():
     )
     builder = ModelActionBuilder(provider, ToolRegistry([EchoTool()]))
 
-    action = builder.build_recovery_action(
-        make_plan(),
-        Action("task-1", "echo", {"message": "broken"}),
-        Observation("task-1", False, error="invalid input"),
-        1,
+    decision = builder.build_recovery_action_with_diagnosis(
+        make_plan(), Action("task-1", "echo", {"message": "broken"}),
+        Observation("task-1", False, error="invalid input"), 1,
     )
 
-    assert action is not None
-    assert action.task_id == "task-1"
-    assert action.input == {"message": "fixed"}
-    assert "why" in provider.messages[0][0].content
+    assert decision.action is not None
+    assert decision.diagnosis.startswith("The first input")
+    assert decision.action.input == {"message": "fixed"}
 
 
 def test_model_recovery_can_decline_when_no_safe_fix_exists():
     provider = ScriptedProvider('{"diagnosis":"No safe recovery is available.","action":null}')
     builder = ModelActionBuilder(provider, ToolRegistry([EchoTool()]))
-
-    action = builder.build_recovery_action(
-        make_plan(),
-        Action("task-1", "echo", {"message": "broken"}),
-        Observation("task-1", False, error="unknown"),
-        1,
+    decision = builder.build_recovery_action_with_diagnosis(
+        make_plan(), Action("task-1", "echo", {"message": "broken"}),
+        Observation("task-1", False, error="unknown"), 1,
     )
-
-    assert action is None
+    assert decision.action is None
+    assert decision.diagnosis == "No safe recovery is available."
