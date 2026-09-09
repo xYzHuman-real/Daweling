@@ -37,14 +37,17 @@ def run_instruction_evaluation(
     predict: Callable[[str], str],
 ) -> InstructionReport:
     """Evaluate predictions deterministically using normalized exact match."""
-    results = tuple(
-        InstructionResult(
-            case_id=case.id,
-            score=exact_match(predict(case.instruction), case.expected),
-            prediction=predict(case.instruction),
+    results_list: list[InstructionResult] = []
+    for case in cases:
+        prediction = predict(case.instruction)
+        results_list.append(
+            InstructionResult(
+                case_id=case.id,
+                score=exact_match(prediction, case.expected),
+                prediction=prediction,
+            )
         )
-        for case in cases
-    )
+    results = tuple(results_list)
     if not results:
         raise ValueError("instruction evaluation requires at least one case")
     return InstructionReport(name=name, results=results, score=mean_score(result.score for result in results))
