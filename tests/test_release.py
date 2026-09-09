@@ -59,8 +59,8 @@ def test_release_manifest_links_evaluation_to_training_lineage(monkeypatch, tmp_
     training_manifest = tmp_path / "training.json"
     training_manifest.write_text(
         '{"run_id":"run-123","stage":"pretraining","dataset_manifest":"data/dataset.json",'
-        '"dataset_sha256":"dataset-hash","model_config":{},"training_config":{},"seed":0,"
-        'checkpoint_path":"data/a.pt"}',
+        '"dataset_sha256":"dataset-hash","model_config":{},"training_config":{},"seed":0,'
+        '"checkpoint_path":"data/a.pt"}',
         encoding="utf-8",
     )
     release_path = tmp_path / "release.json"
