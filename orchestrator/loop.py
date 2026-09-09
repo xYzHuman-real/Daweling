@@ -8,9 +8,7 @@ from typing import Callable, Iterable
 from core.decision import Decision, DecisionContext, DecisionEngine, NextStep
 from core.models import Action, Goal, Observation, Plan, VerificationResult
 from core.runtime import Runtime
-
 from planner import Planner
-
 
 ActionBuilder = Callable[[Plan], Iterable[Action]]
 RecoveryHandler = Callable[[Plan, Action, Observation], Action | None]
@@ -69,6 +67,7 @@ class DecisionDrivenLoop:
         result = LoopResult(plan)
         recovery_attempts = 0
         replan_rounds = 0
+        base_action_builder = action_builder
 
         while True:
             actions = list(action_builder(plan))
@@ -90,11 +89,7 @@ class DecisionDrivenLoop:
             )
             result.decisions.append(decision)
 
-            if decision.next_step is NextStep.COMPLETE:
-                result.recovery_attempts = recovery_attempts
-                result.replan_rounds = replan_rounds
-                return result
-            if decision.next_step is NextStep.FAIL:
+            if decision.next_step in (NextStep.COMPLETE, NextStep.FAIL):
                 result.recovery_attempts = recovery_attempts
                 result.replan_rounds = replan_rounds
                 return result
@@ -122,9 +117,12 @@ class DecisionDrivenLoop:
                 if replacement is None:
                     result.decisions.append(Decision(NextStep.FAIL, "Recovery handler could not produce a replacement action."))
                     return result
-                action_map = {action.task_id: action for action in actions}
-                action_map[replacement.task_id] = replacement
-                action_builder = lambda current_plan, _map=action_map: _map.values()
+                previous_builder = base_action_builder
+                base_action_builder = lambda current_plan, previous=previous_builder, replacement=replacement: [
+                    replacement if action.task_id == replacement.task_id else action
+                    for action in previous(current_plan)
+                ]
+                action_builder = base_action_builder
                 continue
 
             if decision.next_step is NextStep.REPLAN:
@@ -136,6 +134,7 @@ class DecisionDrivenLoop:
                 replan_rounds += 1
                 result.replan_rounds = replan_rounds
                 recovery_attempts = 0
+                base_action_builder = action_builder = action_builder
                 continue
 
     @staticmethod
