@@ -1,6 +1,7 @@
 """Training package public APIs."""
 
 from .curriculum import CurriculumBatch, CurriculumExample, CurriculumScheduler, CurriculumStage
+from .curriculum_dataset import CurriculumTokenExample, curriculum_batch, rows_to_curriculum_examples
 from .curriculum_mixer import CurriculumMix, CurriculumMixer, MixedExample
 from .experiment import TrainingRunManifest, make_run_id, sha256_file
 from .release_pipeline import train_evaluate_release
@@ -13,11 +14,14 @@ __all__ = [
     "CurriculumMixer",
     "CurriculumScheduler",
     "CurriculumStage",
+    "CurriculumTokenExample",
     "MixedExample",
     "TrainingRunManifest",
+    "curriculum_batch",
     "make_batch",
     "make_examples",
     "make_run_id",
+    "rows_to_curriculum_examples",
     "sha256_file",
     "train",
     "train_evaluate_release",
