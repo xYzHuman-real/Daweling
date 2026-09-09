@@ -1,5 +1,7 @@
 """Registry for specialized Daweling agents."""
 
+from __future__ import annotations
+
 from .base import BaseAgent
 
 
