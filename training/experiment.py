@@ -50,8 +50,11 @@ def sha256_file(path: str | Path) -> str:
 
 
 def make_run_id(*, stage: str, dataset_sha256: str | None, model_config: dict[str, Any], training_config: dict[str, Any], seed: int) -> str:
+    """Build a stable experiment identity; target step count is intentionally resumable."""
+    identity_config = dict(training_config)
+    identity_config.pop("steps", None)
     payload = json.dumps(
-        {"stage": stage, "dataset_sha256": dataset_sha256, "model_config": model_config, "training_config": training_config, "seed": seed},
+        {"stage": stage, "dataset_sha256": dataset_sha256, "model_config": model_config, "training_config": identity_config, "seed": seed},
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
