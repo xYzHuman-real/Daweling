@@ -1,5 +1,6 @@
 """Evaluation primitives and suite runners for Daweling model development."""
 
+from .checkpoint_selection import CheckpointCandidate, CheckpointSelection, select_checkpoint
 from .experiment import ExperimentRecord, load_experiment, save_experiment
 from .history import BenchmarkDelta, ExperimentComparison, compare_experiment_files, compare_experiments
 from .metrics import exact_match, mean_score, perplexity
@@ -9,6 +10,8 @@ from .suites import BenchmarkSpec, EvaluationSuiteReport, run_suite
 __all__ = [
     "BenchmarkDelta",
     "BenchmarkSpec",
+    "CheckpointCandidate",
+    "CheckpointSelection",
     "EvaluationSuiteReport",
     "ExperimentComparison",
     "ExperimentRecord",
@@ -22,4 +25,5 @@ __all__ = [
     "perplexity",
     "run_suite",
     "save_experiment",
+    "select_checkpoint",
 ]
