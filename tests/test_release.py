@@ -26,8 +26,10 @@ def test_release_pipeline_evaluates_all_candidates_and_selects_best(monkeypatch,
 
 
 def test_release_pipeline_rejects_regression_failures(monkeypatch):
+    scores = {"data/a.pt": "4", "data/b.pt": "wrong"}
+
     def fake_generate(path, prompt, *, config, device):
-        return "4"
+        return scores[str(path)]
 
     monkeypatch.setattr("evaluation.checkpoint_evaluator.generate_from_checkpoint", fake_generate)
 
@@ -39,4 +41,4 @@ def test_release_pipeline_rejects_regression_failures(monkeypatch):
     )
 
     assert selection.selected.path == Path("data/a.pt")
-    assert selection.rejected == ()
+    assert [candidate.path for candidate in selection.rejected] == [Path("data/b.pt")]
