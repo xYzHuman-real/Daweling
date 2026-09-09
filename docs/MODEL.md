@@ -10,11 +10,12 @@ Daweling is intended to become an AI with its own model layer. The first impleme
 - A minimal AdamW pretraining loop with gradient clipping.
 - Checkpoint serialization and an autoregressive inference/generation API.
 - Temperature, top-k, greedy generation, context-window handling, and EOS stopping.
-- Safe checkpoint loading and automatic model reconstruction from saved configuration.
+- Safe checkpoint loading and model configuration validation.
 - A dependency-free dataset validation/cleaning pipeline.
 - Deterministic train/validation splitting.
 - A reproducible evaluation package with metric primitives and benchmark runners.
 - An instruction-tuning dataset schema and trainer that masks prompt tokens from the training loss.
+- Instruction tuning can initialize from a compatible pretrained Daweling checkpoint and reports validation loss.
 
 ## Current scale
 
@@ -46,27 +47,29 @@ Prepare a UTF-8 text corpus and run:
 python -m training.train path/to/corpus.txt --steps 100
 ```
 
-Then instruction-tune on approved instruction/response JSONL data:
+Then instruction-tune from the pretrained checkpoint:
 
 ```bash
-python -m training.instruction_tuning path/to/instructions.jsonl --steps 100
+python -m training.instruction_tuning \
+  path/to/instructions.jsonl \
+  --pretrained data/daweling-small.pt \
+  --steps 100
 ```
 
-The default instruction checkpoint is `data/daweling-instruct.pt`. Runtime memory and generated checkpoints should remain local and should not be committed to the repository.
+The trainer validates checkpoint configuration compatibility, keeps a validation split separate from training examples, and reports validation loss during training. The default instruction checkpoint is `data/daweling-instruct.pt`.
 
 ## Inference
 
-The generation layer performs autoregressive next-token inference. A saved checkpoint can be reconstructed from its stored model configuration and used directly for generation:
+The generation layer performs autoregressive next-token inference. A saved checkpoint can be loaded into the matching Daweling Transformer and used for generation.
 
 ```python
-from model.generate import GenerationConfig
-from model.inference import generate_from_checkpoint
+from model import DawelingTokenizer, DawelingTransformer, ModelConfig
+from model.generate import GenerationConfig, generate
+from model.inference import load_checkpoint
 
-text = generate_from_checkpoint(
-    "data/daweling-instruct.pt",
-    "User: Explain photosynthesis simply.\\nAssistant:",
-    config=GenerationConfig(max_new_tokens=64, do_sample=False),
-)
+model = DawelingTransformer(ModelConfig(vocab_size=DawelingTokenizer().vocab_size))
+load_checkpoint(model, "data/daweling-instruct.pt")
+text = generate(model, DawelingTokenizer(), "User: Explain photosynthesis simply.\\nAssistant:", GenerationConfig(max_new_tokens=64, do_sample=False))
 print(text)
 ```
 
@@ -88,7 +91,7 @@ print(report.score)
 2. Add tokenizer tests and a learned subword tokenizer experiment.
 3. Expand evaluation into task suites, regression tracking, safety checks, and contamination checks.
 4. Add mixed-precision and accelerator-aware training.
-5. Add supervised fine-tuning that initializes from a pretrained Daweling checkpoint instead of random weights.
+5. Add a dedicated supervised fine-tuning evaluation suite and best-checkpoint selection.
 6. Add preference optimization only after supervised instruction tuning and evaluation are reliable.
 7. Scale model and dataset only after evaluation demonstrates useful gains.
 8. Connect the model to Daweling's reasoning, memory, tools, agents, and verification layers.
