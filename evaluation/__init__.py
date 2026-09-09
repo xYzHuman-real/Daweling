@@ -2,9 +2,10 @@
 
 from .metrics import exact_match, mean_score, perplexity
 from .regression import RegressionReport, compare_scores
-from .suites import EvaluationSuiteReport, run_suite
+from .suites import BenchmarkSpec, EvaluationSuiteReport, run_suite
 
 __all__ = [
+    "BenchmarkSpec",
     "EvaluationSuiteReport",
     "RegressionReport",
     "compare_scores",
