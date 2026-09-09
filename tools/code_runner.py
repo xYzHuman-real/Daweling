@@ -5,7 +5,7 @@ from typing import Any, Callable
 from core.policy import ToolRisk
 
 from .base import BaseTool, ToolResult
-
+from .http_backends import HttpSandboxBackend
 
 RunnerBackend = Callable[[str], Any]
 
@@ -22,6 +22,10 @@ class CodeRunnerTool(BaseTool):
             raise ValueError("max_code_length must be greater than zero")
         self.backend = backend
         self.max_code_length = max_code_length
+
+    @classmethod
+    def from_http(cls, url: str, api_key: str | None = None, timeout: float = 15.0, max_code_length: int = 20_000) -> "CodeRunnerTool":
+        return cls(HttpSandboxBackend(url, timeout=timeout, api_key=api_key), max_code_length=max_code_length)
 
     def run(self, input_data: dict[str, Any]) -> ToolResult:
         code = str(input_data.get("code", ""))
