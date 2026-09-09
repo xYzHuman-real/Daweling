@@ -67,10 +67,11 @@ class DecisionDrivenLoop:
         result = LoopResult(plan)
         recovery_attempts = 0
         replan_rounds = 0
-        base_action_builder = action_builder
+        root_action_builder = action_builder
+        current_action_builder = action_builder
 
         while True:
-            actions = list(action_builder(plan))
+            actions = list(current_action_builder(plan))
             self._validate_actions(plan, actions)
             result.observations = self.runtime.execute(plan, actions)
             result.verifications = [self.runtime.verify(item) for item in result.observations]
@@ -117,12 +118,11 @@ class DecisionDrivenLoop:
                 if replacement is None:
                     result.decisions.append(Decision(NextStep.FAIL, "Recovery handler could not produce a replacement action."))
                     return result
-                previous_builder = base_action_builder
-                base_action_builder = lambda current_plan, previous=previous_builder, replacement=replacement: [
+                previous_builder = current_action_builder
+                current_action_builder = lambda current_plan, previous=previous_builder, replacement=replacement: [
                     replacement if action.task_id == replacement.task_id else action
                     for action in previous(current_plan)
                 ]
-                action_builder = base_action_builder
                 continue
 
             if decision.next_step is NextStep.REPLAN:
@@ -134,7 +134,7 @@ class DecisionDrivenLoop:
                 replan_rounds += 1
                 result.replan_rounds = replan_rounds
                 recovery_attempts = 0
-                base_action_builder = action_builder = action_builder
+                current_action_builder = root_action_builder
                 continue
 
     @staticmethod
