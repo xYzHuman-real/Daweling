@@ -45,9 +45,12 @@ Agent Orchestrator
              ↓
       Verification Layer
              ↓
-      Recovery / Adaptive Replan
-             ↓
-          Result / Action
+      Deterministic Decision Engine
+        ├── Review
+        ├── Recover
+        ├── Replan
+        ├── Complete
+        └── Fail
              ↓
            Memory
 ```
@@ -72,9 +75,10 @@ Daweling will be developed incrementally:
 - Human approval for consequential actions.
 - Provider/model agnostic where practical.
 - Security and privacy from the beginning.
+- Deterministic control policy over opaque model-controlled execution.
 
 ## Status
 
 🚧 **Daweling is in active foundation development.**
 
-The runtime now has bounded failure recovery, adaptive replanning, and a shared-context multi-agent collaboration layer. This is still an early foundation—not a frontier-scale model—and the architecture is intentionally being built so model capability can grow without replacing the system around it.
+The runtime now has bounded failure recovery, adaptive replanning, shared-context multi-agent collaboration, peer review, and a deterministic decision layer that selects the next workflow stage from explicit evidence and bounded budgets. This is still an early foundation—not a frontier-scale model—and the architecture is intentionally being built so model capability can grow without replacing the system around it.
