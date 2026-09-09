@@ -1,5 +1,7 @@
 """Registry for discovering and retrieving Daweling tools."""
 
+from __future__ import annotations
+
 from typing import Dict, Iterable
 
 from .base import BaseTool
