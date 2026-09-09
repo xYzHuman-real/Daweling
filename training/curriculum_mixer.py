@@ -24,7 +24,7 @@ class CurriculumMix:
 
 
 class CurriculumMixer:
-    """Build reproducible capability mixtures while preventing low-quality examples from entering."""
+    """Build reproducible capability mixtures while preventing invalid examples from entering."""
 
     def __init__(self, scheduler: CurriculumScheduler | None = None) -> None:
         self.scheduler = scheduler or CurriculumScheduler()
@@ -55,3 +55,13 @@ class CurriculumMixer:
             key = item.stage.name.lower()
             result[key] = result.get(key, 0.0) + item.weight
         return result
+
+    @staticmethod
+    def sample_indices(mix: CurriculumMix, count: int, *, seed: int = 0) -> tuple[int, ...]:
+        """Return deterministic weighted samples with replacement."""
+        if count <= 0:
+            raise ValueError("count must be greater than zero")
+        import random
+        rng = random.Random(seed)
+        weights = [item.weight for item in mix.examples]
+        return tuple(rng.choices(range(len(mix.examples)), weights=weights, k=count))
