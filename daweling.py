@@ -76,7 +76,9 @@ class Daweling:
 
     def run_with_recovery(self, goal: Goal, recover: RecoveryCallback | None = None) -> ExecutionResult:
         """Run the complete bounded control loop with model-guided recovery and replanning."""
-        plan, _, agent_work = self._prepare(goal)
+        context = self.context_engine.build(goal)
+        plan = self.planner.create_plan(goal, context=context)
+        agent_work = self.agent_executor.as_action_context([])
         executed_actions: list[Action] = []
         diagnoses: list[str] = []
 
@@ -90,7 +92,7 @@ class Daweling:
             return actions
 
         def recover_action(current_plan, action, observation):
-            attempt = sum(1 for _ in diagnoses) + 1
+            attempt = len(diagnoses) + 1
             if recover is not None:
                 replacement = recover(action, observation, attempt)
                 if replacement is not None:
@@ -103,17 +105,10 @@ class Daweling:
             return decision.action
 
         def replan(current_plan, observations, verifications, actions):
-            return self.adaptive_planner.replan(
-                current_plan, observations, verifications, actions
-            ).plan
+            return self.adaptive_planner.replan(current_plan, observations, verifications, actions).plan
 
-        loop_result = self.loop.run(
-            goal,
-            build_actions,
-            initial_plan=plan,
-            recover=recover_action,
-            replan=replan,
-        )
+        loop_result = self.loop.run(goal, build_actions, initial_plan=plan,
+                                    recover=recover_action, replan=replan)
         result = ExecutionResult(loop_result.plan, loop_result.observations, loop_result.verifications, agent_work)
         return self._record_result(goal, result, executed_actions, diagnoses)
 
