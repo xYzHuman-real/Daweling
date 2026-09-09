@@ -2,6 +2,7 @@ from pathlib import Path
 
 from evaluation.benchmarks import BenchmarkCase
 from evaluation.experiment import load_experiment
+from evaluation.model_registry import ModelRegistry
 from evaluation.release import evaluate_and_select_checkpoints
 from evaluation.release_manifest import ReleaseManifest
 
@@ -84,3 +85,28 @@ def test_release_manifest_links_evaluation_to_training_lineage(monkeypatch, tmp_
     assert manifest.dataset_sha256 == "dataset-hash"
     assert manifest.rejected_checkpoints == ("data/b.pt",)
     assert manifest.evaluation_experiments["data/a.pt"] == "a"
+
+
+def test_release_pipeline_promotes_selected_model_to_registry(monkeypatch, tmp_path):
+    scores = {"data/a.pt": "wrong", "data/b.pt": "4"}
+
+    def fake_generate(path, prompt, *, config, device):
+        return scores[str(path)]
+
+    monkeypatch.setattr("evaluation.checkpoint_evaluator.generate_from_checkpoint", fake_generate)
+    for path in (Path("data/a.pt"), Path("data/b.pt")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(path.name.encode())
+
+    registry_path = tmp_path / "models.json"
+    selection = evaluate_and_select_checkpoints(
+        [Path("data/a.pt"), Path("data/b.pt")],
+        [("math", [BenchmarkCase("addition", "2 + 2", "4")])],
+        experiment_dir=tmp_path / "experiments",
+        model_registry_path=registry_path,
+    )
+
+    best = ModelRegistry(registry_path).best()
+    assert best is not None
+    assert best.checkpoint == str(selection.selected.path)
+    assert best.score == 1.0
