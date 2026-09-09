@@ -80,7 +80,7 @@ def _save_checkpoint(path: Path, model: DawelingTransformer, optimizer: torch.op
 
 
 def train(text_path: Path | None, output_path: Path, steps: int, learning_rate: float, *, seed: int = 0, dataset_manifest_path: Path | None = None, validation_text_path: Path | None = None, dataset_path: Path | None = None, validation_ratio: float = 0.1, split_seed: int = 0, batch_size: int = 1, validation_interval: int = 10, resume_from: Path | None = None, best_output_path: Path | None = None, warmup_steps: int = 0, min_learning_rate: float = 0.0, gradient_accumulation_steps: int = 1) -> TrainingRunManifest:
-    """Train from text or a first-class deterministic dataset partition."""
+    """Train from text inputs or a first-class deterministic dataset partition."""
     if steps <= 0 or batch_size <= 0 or validation_interval <= 0 or gradient_accumulation_steps <= 0:
         raise ValueError("steps, batch_size, validation_interval, and gradient_accumulation_steps must be greater than zero")
     if warmup_steps < 0 or warmup_steps >= steps:
@@ -97,16 +97,20 @@ def train(text_path: Path | None, output_path: Path, steps: int, learning_rate: 
 
     if dataset_path is not None:
         partitions = load_partitions(dataset_path, validation_ratio=validation_ratio, seed=split_seed)
-        examples = make_examples_from_rows(partitions.train, tokenizer, config.max_sequence_length)
-        validation_examples = make_examples_from_rows(partitions.validation, tokenizer, config.max_sequence_length)
+        train_text = "\n".join(partitions.train_texts)
+        validation_text = "\n".join(partitions.validation_texts)
+        examples = list(make_examples(train_text, tokenizer, config.max_sequence_length))
+        validation_examples = list(make_examples(validation_text, tokenizer, config.max_sequence_length))
         dataset_sha256 = sha256_file(dataset_path)
-        validation_sha256 = partitions.validation_sha256
-        split_config = {"validation_ratio": validation_ratio, "split_seed": split_seed, "train_examples": len(partitions.train), "validation_examples": len(partitions.validation), "train_sha256": partitions.train_sha256, "validation_sha256": validation_sha256}
+        import hashlib
+        validation_sha256 = hashlib.sha256(validation_text.encode("utf-8")).hexdigest()
+        split_config = {"validation_ratio": validation_ratio, "split_seed": split_seed, "train_examples": partitions.train_count, "validation_examples": partitions.validation_count, "validation_sha256": validation_sha256}
     else:
         text = text_path.read_text(encoding="utf-8")
         examples = list(make_examples(text, tokenizer, config.max_sequence_length))
         validation_path = validation_text_path or text_path
-        validation_examples = list(make_examples(validation_path.read_text(encoding="utf-8"), tokenizer, config.max_sequence_length))
+        validation_text = validation_path.read_text(encoding="utf-8")
+        validation_examples = list(make_examples(validation_text, tokenizer, config.max_sequence_length))
         dataset_sha256 = DatasetManifest.load(dataset_manifest_path).output_sha256 if dataset_manifest_path else None
         validation_sha256 = sha256_file(validation_path)
         split_config = {"legacy_text_inputs": True}
@@ -156,7 +160,7 @@ def train(text_path: Path | None, output_path: Path, steps: int, learning_rate: 
                 best_validation_loss, best_step = val_loss, completed
                 _save_checkpoint(best_output_path or output_path.with_suffix(output_path.suffix + ".best.pt"), model, optimizer, step=completed, run_id=run_id, seed=seed, config=model_config, training_config=training_config, dataset_manifest=str(dataset_manifest_path or dataset_path) if (dataset_manifest_path or dataset_path) else None, dataset_sha256=dataset_sha256, validation_text_sha256=validation_sha256, best_validation_loss=best_validation_loss, best_step=best_step, parent_checkpoint=parent_checkpoint)
             _save_checkpoint(output_path, model, optimizer, step=completed, run_id=run_id, seed=seed, config=model_config, training_config=training_config, dataset_manifest=str(dataset_manifest_path or dataset_path) if (dataset_manifest_path or dataset_path) else None, dataset_sha256=dataset_sha256, validation_text_sha256=validation_sha256, best_validation_loss=best_validation_loss, best_step=best_step, parent_checkpoint=parent_checkpoint)
-    lineage = TrainingRunManifest(run_id=run_id, stage="pretraining", dataset_manifest=str(dataset_manifest_path or dataset_path) if (dataset_manifest_path or dataset_path) else None, dataset_sha256=dataset_sha256, model_config=model_config, training_config=training_config, seed=seed, checkpoint_path=str(output_path), checkpoint_sha256=sha256_file(output_path), parent_checkpoint=parent_checkpoint, metadata={"training_text_sha256": sha256_file(text_path) if text_path else None, "validation_text_sha256": validation_sha256, "training_examples": len(examples), "validation_examples": len(validation_examples), "effective_batch_size": batch_size * gradient_accumulation_steps, "examples_seen": steps * batch_size, "dataset_split": split_config}, last_step=steps, best_validation_loss=best_validation_loss, best_step=best_step)
+    lineage = TrainingRunManifest(run_id=run_id, stage="pretraining", dataset_manifest=str(dataset_manifest_path or dataset_path) if (dataset_manifest_path or dataset_path) else None, dataset_sha256=dataset_sha256, model_config=model_config, training_config=training_config, seed=seed, checkpoint_path=str(output_path), checkpoint_sha256=sha256_file(output_path), parent_checkpoint=parent_checkpoint, metadata={"training_text_sha256": sha256_file(text_path) if text_path else dataset_sha256, "validation_text_sha256": validation_sha256, "training_examples": len(examples), "validation_examples": len(validation_examples), "effective_batch_size": batch_size * gradient_accumulation_steps, "examples_seen": steps * batch_size, "dataset_split": split_config}, last_step=steps, best_validation_loss=best_validation_loss, best_step=best_step)
     lineage.save(output_path.with_suffix(output_path.suffix + ".manifest.json"))
     print(f"saved checkpoint: {output_path}")
     return lineage
