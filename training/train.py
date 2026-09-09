@@ -21,11 +21,7 @@ def make_examples(text: str, tokenizer: DawelingTokenizer, sequence_length: int)
         yield torch.tensor(chunk[:-1], dtype=torch.long), torch.tensor(chunk[1:], dtype=torch.long)
 
 
-def make_batch(
-    examples: list[tuple[torch.Tensor, torch.Tensor]],
-    batch_size: int,
-    step: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
+def make_batch(examples: list[tuple[torch.Tensor, torch.Tensor]], batch_size: int, step: int) -> tuple[torch.Tensor, torch.Tensor]:
     """Build a deterministic mini-batch by cycling through prepared examples."""
     if not examples:
         raise ValueError("examples must not be empty")
@@ -61,23 +57,31 @@ def _load_resume(path: Path, model: DawelingTransformer, optimizer: torch.optim.
     checkpoint = torch.load(path, map_location="cpu", weights_only=True)
     if not isinstance(checkpoint, dict) or "state_dict" not in checkpoint:
         raise ValueError("resume checkpoint is invalid")
+    if checkpoint.get("format_version", 1) < 4:
+        raise ValueError("resume checkpoint does not contain deterministic training state; retrain from a format 4 checkpoint")
     raw_config = checkpoint.get("config")
     if raw_config != model.config.__dict__:
         raise ValueError("resume checkpoint model configuration does not match the current model")
     model.load_state_dict(checkpoint["state_dict"])
     optimizer_state = checkpoint.get("optimizer_state_dict")
-    if isinstance(optimizer_state, dict):
-        optimizer.load_state_dict(optimizer_state)
+    if not isinstance(optimizer_state, dict):
+        raise ValueError("resume checkpoint is missing optimizer state")
+    optimizer.load_state_dict(optimizer_state)
+    rng_state = checkpoint.get("rng_state")
+    if not isinstance(rng_state, torch.Tensor):
+        raise ValueError("resume checkpoint is missing RNG state")
+    torch.set_rng_state(rng_state)
     return checkpoint
 
 
 def _save_checkpoint(path: Path, model: DawelingTransformer, optimizer: torch.optim.Optimizer, *, step: int, run_id: str, seed: int, config: dict[str, Any], training_config: dict[str, Any], dataset_manifest: str | None, dataset_sha256: str | None, best_validation_loss: float | None, best_step: int | None, parent_checkpoint: str | None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({
-        "format_version": 3,
+        "format_version": 4,
         "config": config,
         "state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
+        "rng_state": torch.get_rng_state(),
         "step": step,
         "stage": "pretraining",
         "run_id": run_id,
@@ -91,21 +95,8 @@ def _save_checkpoint(path: Path, model: DawelingTransformer, optimizer: torch.op
     }, path)
 
 
-def train(
-    text_path: Path,
-    output_path: Path,
-    steps: int,
-    learning_rate: float,
-    *,
-    seed: int = 0,
-    dataset_manifest_path: Path | None = None,
-    validation_text_path: Path | None = None,
-    batch_size: int = 1,
-    validation_interval: int = 10,
-    resume_from: Path | None = None,
-    best_output_path: Path | None = None,
-) -> TrainingRunManifest:
-    """Train to a target step count, periodically checkpoint, and optionally resume."""
+def train(text_path: Path, output_path: Path, steps: int, learning_rate: float, *, seed: int = 0, dataset_manifest_path: Path | None = None, validation_text_path: Path | None = None, batch_size: int = 1, validation_interval: int = 10, resume_from: Path | None = None, best_output_path: Path | None = None) -> TrainingRunManifest:
+    """Train to a target step count, periodically checkpoint, and optionally resume deterministically."""
     if steps <= 0 or batch_size <= 0 or validation_interval <= 0:
         raise ValueError("steps, batch_size, and validation_interval must be greater than zero")
     torch.manual_seed(seed)
@@ -125,6 +116,7 @@ def train(
         raise ValueError("validation text is too short for the configured sequence length")
 
     dataset_sha256 = DatasetManifest.load(dataset_manifest_path).output_sha256 if dataset_manifest_path else None
+    validation_sha256 = sha256_file(validation_path)
     training_config = {"steps": steps, "learning_rate": learning_rate, "sequence_length": config.max_sequence_length, "optimizer": "AdamW", "gradient_clip_norm": 1.0, "batch_size": batch_size, "validation_interval": validation_interval}
     model_config = config.__dict__
     run_id = make_run_id(stage="pretraining", dataset_sha256=dataset_sha256, model_config=model_config, training_config=training_config, seed=seed)
@@ -140,6 +132,11 @@ def train(
             raise ValueError("resume checkpoint is already beyond the requested target steps")
         if resumed.get("run_id") and resumed["run_id"] != run_id:
             raise ValueError("resume checkpoint run_id does not match the current training configuration")
+        if resumed.get("dataset_sha256") != dataset_sha256:
+            raise ValueError("resume checkpoint dataset identity does not match the current dataset")
+        resumed_validation_sha256 = resumed.get("validation_text_sha256")
+        if resumed_validation_sha256 is not None and resumed_validation_sha256 != validation_sha256:
+            raise ValueError("resume checkpoint validation dataset does not match the current validation text")
         best_validation_loss = resumed.get("best_validation_loss")
         best_step = resumed.get("best_step")
         print(f"resuming from step={start_step}")
@@ -164,7 +161,7 @@ def train(
         if completed_step % validation_interval == 0 or completed_step == steps:
             _save_checkpoint(output_path, model, optimizer, step=completed_step, run_id=run_id, seed=seed, config=model_config, training_config=training_config, dataset_manifest=str(dataset_manifest_path) if dataset_manifest_path else None, dataset_sha256=dataset_sha256, best_validation_loss=best_validation_loss, best_step=best_step, parent_checkpoint=parent_checkpoint)
 
-    lineage = TrainingRunManifest(run_id=run_id, stage="pretraining", dataset_manifest=str(dataset_manifest_path) if dataset_manifest_path else None, dataset_sha256=dataset_sha256, model_config=model_config, training_config=training_config, seed=seed, checkpoint_path=str(output_path), checkpoint_sha256=sha256_file(output_path), parent_checkpoint=parent_checkpoint, metadata={"training_text_sha256": sha256_file(text_path), "validation_text_sha256": sha256_file(validation_path)}, last_step=steps, best_validation_loss=best_validation_loss, best_step=best_step)
+    lineage = TrainingRunManifest(run_id=run_id, stage="pretraining", dataset_manifest=str(dataset_manifest_path) if dataset_manifest_path else None, dataset_sha256=dataset_sha256, model_config=model_config, training_config=training_config, seed=seed, checkpoint_path=str(output_path), checkpoint_sha256=sha256_file(output_path), parent_checkpoint=parent_checkpoint, metadata={"training_text_sha256": sha256_file(text_path), "validation_text_sha256": validation_sha256}, last_step=steps, best_validation_loss=best_validation_loss, best_step=best_step)
     lineage.save(output_path.with_suffix(output_path.suffix + ".manifest.json"))
     print(f"saved checkpoint: {output_path}")
     print(f"saved run manifest: {output_path.with_suffix(output_path.suffix + '.manifest.json')}")
