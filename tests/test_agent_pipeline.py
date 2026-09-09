@@ -4,7 +4,8 @@ from agents.debate import AgentDebate
 from agents.pipeline import AgentPipeline
 from agents.registry import AgentRegistry
 from agents.router import AgentRouter
-from core.models import Goal, Plan, Task
+from core.decision import NextStep
+from core.models import Action, Goal, Plan, Task
 from core.runtime import Runtime
 from tools.base import BaseTool, ToolResult
 from tools.registry import ToolRegistry
@@ -41,7 +42,7 @@ class OneTaskPlanner:
         return Plan(goal, [Task("task-1", "research the answer")])
 
 
-def test_pipeline_connects_collaboration_execution_verification_and_review():
+def test_pipeline_connects_collaboration_execution_verification_review_and_decision():
     registry = AgentRegistry([ResearchAgent(), ReviewAgent()])
     collaborator = AgentCollaborator(AgentRouter(registry))
     debate = AgentDebate([registry.require("review")])
@@ -49,11 +50,12 @@ def test_pipeline_connects_collaboration_execution_verification_and_review():
 
     result = pipeline.run(
         Goal("answer"),
-        lambda plan, context: [__import__("core.models", fromlist=["Action"]).Action("task-1", "echo", {"message": context["task-1"]["output"]})],
+        lambda plan, context: [Action("task-1", "echo", {"message": context["task-1"]["output"]})],
     )
 
     assert result.collaboration.context["task-1"]["output"] == "evidence"
     assert result.observations[0].output == "evidence"
     assert result.verifications[0].valid
     assert result.review is not None and result.review.accepted
+    assert result.decision is not None and result.decision.next_step is NextStep.COMPLETE
     assert result.success
