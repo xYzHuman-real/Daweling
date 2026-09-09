@@ -16,59 +16,49 @@ from tools.config import CapabilityConfig
 from tools.registry import ToolRegistry
 
 
+class _ModelRecovery:
+    """Adapter that exposes the model's diagnosis to the recovery engine."""
+    def __init__(self, builder: ModelActionBuilder, plan) -> None:
+        self.builder = builder
+        self.plan = plan
+        self.last_diagnosis = None
+
+    def __call__(self, action, observation, attempt):
+        result = self.builder.build_recovery_action_with_diagnosis(
+            self.plan, action, observation, attempt
+        )
+        self.last_diagnosis = result.diagnosis
+        return result.action
+
+
 class Daweling:
     """Run goals through model, agents, memory, planning, tools, verification, and learning."""
 
-    def __init__(
-        self,
-        provider: ModelProvider,
-        registry: ToolRegistry | None = None,
-        memory: MemoryStore | None = None,
-        agent_registry: AgentRegistry | None = None,
-        approval_policy: ApprovalPolicy | None = None,
-        capability_config: CapabilityConfig | None = None,
-        max_recovery_attempts: int = 2,
-    ) -> None:
+    def __init__(self, provider: ModelProvider, registry: ToolRegistry | None = None,
+                 memory: MemoryStore | None = None, agent_registry: AgentRegistry | None = None,
+                 approval_policy: ApprovalPolicy | None = None,
+                 capability_config: CapabilityConfig | None = None, max_recovery_attempts: int = 2) -> None:
         self.registry = registry or ToolRegistry()
         self.memory = memory or MemoryStore()
         self.context_engine = ContextEngine(self.memory)
         self.experience_recorder = ExperienceRecorder(self.memory)
         self.planner = ModelPlanner(provider)
         self.action_builder = ModelActionBuilder(provider, self.registry)
-
-        self.agent_registry = agent_registry or AgentRegistry([
-            ResearchAgent(provider),
-            CodingAgent(provider),
-        ])
+        self.agent_registry = agent_registry or AgentRegistry([ResearchAgent(provider), CodingAgent(provider)])
         self.agent_router = AgentRouter(self.agent_registry)
         self.agent_executor = AgentExecutor(self.agent_router)
-
         self._configure_capabilities(capability_config or CapabilityConfig.from_env())
         runtime = Runtime(self.registry, approval_policy=approval_policy)
         self.orchestrator = Orchestrator(planner=self.planner, runtime=runtime)
         self.recovery = RecoveryEngine(runtime, max_attempts=max_recovery_attempts)
 
     def _configure_capabilities(self, config: CapabilityConfig) -> None:
-        """Register only capabilities whose external endpoints are explicitly configured."""
         if config.web_search_url and "web_search" not in self.registry:
-            self.registry.register(
-                WebSearchTool.from_http(
-                    config.web_search_url,
-                    api_key=config.web_search_api_key,
-                    timeout=config.web_search_timeout,
-                )
-            )
+            self.registry.register(WebSearchTool.from_http(config.web_search_url, api_key=config.web_search_api_key, timeout=config.web_search_timeout))
         if config.code_runner_url and "code_runner" not in self.registry:
-            self.registry.register(
-                CodeRunnerTool.from_http(
-                    config.code_runner_url,
-                    api_key=config.code_runner_api_key,
-                    timeout=config.code_runner_timeout,
-                )
-            )
+            self.registry.register(CodeRunnerTool.from_http(config.code_runner_url, api_key=config.code_runner_api_key, timeout=config.code_runner_timeout))
 
     def _prepare(self, goal: Goal):
-        """Build the model plan, agent work, and executable actions for a goal."""
         context = self.context_engine.build(goal)
         plan = self.planner.create_plan(goal, context=context)
         agent_executions = self.agent_executor.execute(plan, context=context.as_dict())
@@ -77,58 +67,34 @@ class Daweling:
         self.orchestrator.validate_actions(plan, actions)
         return plan, actions, agent_work
 
-    def _record_result(self, goal: Goal, result: ExecutionResult, actions: list[Action]) -> ExecutionResult:
-        """Persist execution experience for future planning."""
+    def _record_result(self, goal, result, actions, diagnoses=()):
         self.experience_recorder.record(
-            goal=goal.description,
-            success=result.success,
-            verifications=result.verifications,
-            task_count=len(result.plan.tasks),
-            successful_tasks=sum(observation.success for observation in result.observations),
-            failed_tasks=sum(not observation.success for observation in result.observations),
-            tools_used=[action.tool for action in actions],
+            goal=goal.description, success=result.success, verifications=result.verifications,
+            task_count=len(result.plan.tasks), successful_tasks=sum(o.success for o in result.observations),
+            failed_tasks=sum(not o.success for o in result.observations),
+            tools_used=[a.tool for a in actions], recovery_diagnoses=list(diagnoses),
+            recovery_attempts=len(diagnoses),
         )
         return result
 
     def run(self, goal: Goal) -> ExecutionResult:
-        """Execute Goal → Plan → Agent → Action → Tool → Verify → Learn."""
         plan, actions, agent_work = self._prepare(goal)
         observations = self.orchestrator.runtime.execute(plan, actions)
-        verifications = [self.orchestrator.runtime.verify(observation) for observation in observations]
-        return self._record_result(
-            goal,
-            ExecutionResult(plan=plan, observations=observations, verifications=verifications, agent_work=agent_work),
-            actions,
-        )
+        verifications = [self.orchestrator.runtime.verify(o) for o in observations]
+        return self._record_result(goal, ExecutionResult(plan, observations, verifications, agent_work), actions)
 
     def run_with_recovery(self, goal: Goal, recover: RecoveryCallback | None = None) -> ExecutionResult:
-        """Execute a goal and recover failed actions with a supplied or model-driven strategy."""
         plan, actions, agent_work = self._prepare(goal)
-        recovery_callback = recover or (
-            lambda action, observation, attempt: self.action_builder.build_recovery_action(
-                plan, action, observation, attempt
-            )
-        )
-        observations = []
-        verifications = []
-        executed_actions: list[Action] = []
+        recovery_callback = recover or _ModelRecovery(self.action_builder, plan)
+        observations, verifications, executed_actions, diagnoses = [], [], [], []
         for action in actions:
             recovery_result = self.recovery.execute(plan, action, recovery_callback)
             final_observation = recovery_result.observations[-1]
             observations.append(final_observation)
             verifications.append(self.orchestrator.runtime.verify(final_observation))
-            executed_actions.extend(
-                attempt.replacement_action
-                for attempt in recovery_result.attempts
-                if attempt.replacement_action is not None
-            )
+            executed_actions.extend(a.replacement_action for a in recovery_result.attempts if a.replacement_action)
+            diagnoses.extend(recovery_result.diagnoses)
             if not final_observation.success:
                 break
-
-        result = ExecutionResult(
-            plan=plan,
-            observations=observations,
-            verifications=verifications,
-            agent_work=agent_work,
-        )
-        return self._record_result(goal, result, actions + executed_actions)
+        result = ExecutionResult(plan, observations, verifications, agent_work)
+        return self._record_result(goal, result, actions + executed_actions, diagnoses)
