@@ -15,10 +15,13 @@ def _bucket(example: dict, seed: int) -> int:
 
 
 def split_examples(examples: Iterable[dict], validation_ratio: float = 0.1, seed: int = 0) -> tuple[list[dict], list[dict]]:
+    """Return deterministic, disjoint train/validation partitions."""
     if not 0 < validation_ratio < 1:
         raise ValueError("validation_ratio must be between 0 and 1")
-    ordered = sorted(examples, key=lambda item: _bucket(item, seed))
-    cutoff = max(1, round(len(ordered) * validation_ratio)) if ordered else 0
+    ordered = sorted(examples, key=lambda item: (_bucket(item, seed), item.get("source", ""), item.get("text", "")))
+    if len(ordered) < 2:
+        raise ValueError("at least two examples are required for a split")
+    cutoff = max(1, min(len(ordered) - 1, round(len(ordered) * validation_ratio)))
     return ordered[cutoff:], ordered[:cutoff]
 
 
@@ -31,9 +34,11 @@ def read_jsonl(path: str | Path) -> list[dict]:
 
 
 def write_jsonl(path: str | Path, rows: Iterable[dict]) -> None:
-    with Path(path).open("w", encoding="utf-8") as handle:
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("w", encoding="utf-8") as handle:
         for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":
