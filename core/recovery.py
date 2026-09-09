@@ -8,30 +8,32 @@ from typing import Callable
 from .models import Action, Observation, Plan
 from .runtime import Runtime
 
-
 RecoveryCallback = Callable[[Action, Observation, int], Action | None]
 
 
 @dataclass(frozen=True)
 class RecoveryAttempt:
     """One recovery decision made after a failed action."""
-
     attempt: int
     original_action: Action
     failed_observation: Observation
     replacement_action: Action | None
+    diagnosis: str | None = None
 
 
 @dataclass(frozen=True)
 class RecoveryResult:
     """Final outcome plus the bounded recovery history."""
-
     observations: tuple[Observation, ...]
     attempts: tuple[RecoveryAttempt, ...]
 
     @property
     def success(self) -> bool:
         return bool(self.observations) and self.observations[-1].success
+
+    @property
+    def diagnoses(self) -> tuple[str, ...]:
+        return tuple(a.diagnosis for a in self.attempts if a.diagnosis)
 
 
 class RecoveryEngine:
@@ -43,12 +45,7 @@ class RecoveryEngine:
         self.runtime = runtime
         self.max_attempts = max_attempts
 
-    def execute(
-        self,
-        plan: Plan,
-        action: Action,
-        recover: RecoveryCallback | None = None,
-    ) -> RecoveryResult:
+    def execute(self, plan: Plan, action: Action, recover: RecoveryCallback | None = None) -> RecoveryResult:
         """Execute an action and optionally recover from failure with bounded retries."""
         observations = tuple(self.runtime.execute(plan, [action]))
         attempts: list[RecoveryAttempt] = []
@@ -58,19 +55,11 @@ class RecoveryEngine:
             failed = observations[-1]
             if failed.success or recover is None:
                 break
-
             replacement = recover(current, failed, attempt_number)
-            attempts.append(
-                RecoveryAttempt(
-                    attempt=attempt_number,
-                    original_action=current,
-                    failed_observation=failed,
-                    replacement_action=replacement,
-                )
-            )
+            diagnosis = getattr(recover, "last_diagnosis", None)
+            attempts.append(RecoveryAttempt(attempt_number, current, failed, replacement, diagnosis))
             if replacement is None:
                 break
-
             current = replacement
             next_observation = self.runtime.execute(plan, [current])[0]
             observations = (*observations, next_observation)
