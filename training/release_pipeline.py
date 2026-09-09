@@ -13,13 +13,69 @@ from .train import train
 from .experiment import TrainingRunManifest
 
 
-def train_evaluate_release(text_path: str | Path, output_path: str | Path, steps: int, learning_rate: float, benchmarks: Iterable[tuple[str, Iterable[BenchmarkCase]]], *, seed: int = 0, dataset_manifest_path: str | Path | None = None, validation_text_path: str | Path | None = None, batch_size: int = 1, validation_interval: int = 10, resume_from: str | Path | None = None, best_output_path: str | Path | None = None, baseline_score: float | None = None, regression_threshold: float = 0.0, require_regression_pass: bool = True, generation_config: GenerationConfig | None = None, device: str = "cpu", experiment_dir: str | Path | None = None, release_manifest_path: str | Path | None = None, warmup_steps: int = 0, min_learning_rate: float = 0.0) -> tuple[TrainingRunManifest, CheckpointSelection]:
+def train_evaluate_release(
+    text_path: str | Path,
+    output_path: str | Path,
+    steps: int,
+    learning_rate: float,
+    benchmarks: Iterable[tuple[str, Iterable[BenchmarkCase]]],
+    *,
+    seed: int = 0,
+    dataset_manifest_path: str | Path | None = None,
+    validation_text_path: str | Path | None = None,
+    dataset_path: str | Path | None = None,
+    validation_ratio: float = 0.1,
+    split_seed: int = 0,
+    batch_size: int = 1,
+    gradient_accumulation_steps: int = 1,
+    validation_interval: int = 10,
+    resume_from: str | Path | None = None,
+    best_output_path: str | Path | None = None,
+    baseline_score: float | None = None,
+    regression_threshold: float = 0.0,
+    require_regression_pass: bool = True,
+    generation_config: GenerationConfig | None = None,
+    device: str = "cpu",
+    experiment_dir: str | Path | None = None,
+    release_manifest_path: str | Path | None = None,
+    warmup_steps: int = 0,
+    min_learning_rate: float = 0.0,
+) -> tuple[TrainingRunManifest, CheckpointSelection]:
     """Train, evaluate, and select a release candidate with matching training settings."""
     output = Path(output_path)
     best = Path(best_output_path) if best_output_path is not None else output.with_suffix(output.suffix + ".best.pt")
-    training_manifest = train(Path(text_path), output, steps, learning_rate, seed=seed, dataset_manifest_path=Path(dataset_manifest_path) if dataset_manifest_path is not None else None, validation_text_path=Path(validation_text_path) if validation_text_path is not None else None, batch_size=batch_size, validation_interval=validation_interval, resume_from=Path(resume_from) if resume_from is not None else None, best_output_path=best, warmup_steps=warmup_steps, min_learning_rate=min_learning_rate)
+    training_manifest = train(
+        Path(text_path) if text_path is not None else None,
+        output,
+        steps,
+        learning_rate,
+        seed=seed,
+        dataset_manifest_path=Path(dataset_manifest_path) if dataset_manifest_path is not None else None,
+        validation_text_path=Path(validation_text_path) if validation_text_path is not None else None,
+        dataset_path=Path(dataset_path) if dataset_path is not None else None,
+        validation_ratio=validation_ratio,
+        split_seed=split_seed,
+        batch_size=batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        validation_interval=validation_interval,
+        resume_from=Path(resume_from) if resume_from is not None else None,
+        best_output_path=best,
+        warmup_steps=warmup_steps,
+        min_learning_rate=min_learning_rate,
+    )
     candidates = [best, output] if best != output else [output]
     candidates = [path for path in candidates if path.exists()]
     if not candidates:
         raise RuntimeError("training completed without producing a checkpoint")
-    return training_manifest, evaluate_and_select_checkpoints(candidates, tuple(benchmarks), baseline_score=baseline_score, regression_threshold=regression_threshold, require_regression_pass=require_regression_pass, generation_config=generation_config, device=device, experiment_dir=experiment_dir, training_manifest_path=output.with_suffix(output.suffix + ".manifest.json"), release_manifest_path=release_manifest_path)
+    return training_manifest, evaluate_and_select_checkpoints(
+        candidates,
+        tuple(benchmarks),
+        baseline_score=baseline_score,
+        regression_threshold=regression_threshold,
+        require_regression_pass=require_regression_pass,
+        generation_config=generation_config,
+        device=device,
+        experiment_dir=experiment_dir,
+        training_manifest_path=output.with_suffix(output.suffix + ".manifest.json"),
+        release_manifest_path=release_manifest_path,
+    )
