@@ -2,6 +2,7 @@
 
 from agents import AgentExecutor, AgentRegistry, AgentExecution, AgentRouter, CodingAgent, ResearchAgent
 from core.models import Goal
+from core.policy import ApprovalPolicy
 from core.runtime import Runtime
 from memory import ExperienceRecorder, MemoryStore
 from memory.context import ContextEngine
@@ -9,6 +10,8 @@ from models import ModelProvider
 from orchestrator import ExecutionResult, Orchestrator
 from planner.model_action_builder import ModelActionBuilder
 from planner.model_planner import ModelPlanner
+from tools import CodeRunnerTool, WebSearchTool
+from tools.config import CapabilityConfig
 from tools.registry import ToolRegistry
 
 
@@ -21,6 +24,8 @@ class Daweling:
         registry: ToolRegistry | None = None,
         memory: MemoryStore | None = None,
         agent_registry: AgentRegistry | None = None,
+        approval_policy: ApprovalPolicy | None = None,
+        capability_config: CapabilityConfig | None = None,
     ) -> None:
         self.registry = registry or ToolRegistry()
         self.memory = memory or MemoryStore()
@@ -36,10 +41,30 @@ class Daweling:
         self.agent_router = AgentRouter(self.agent_registry)
         self.agent_executor = AgentExecutor(self.agent_router)
 
+        self._configure_capabilities(capability_config or CapabilityConfig.from_env())
         self.orchestrator = Orchestrator(
             planner=self.planner,
-            runtime=Runtime(self.registry),
+            runtime=Runtime(self.registry, approval_policy=approval_policy),
         )
+
+    def _configure_capabilities(self, config: CapabilityConfig) -> None:
+        """Register only capabilities whose external endpoints are explicitly configured."""
+        if config.web_search_url and "web_search" not in self.registry:
+            self.registry.register(
+                WebSearchTool.from_http(
+                    config.web_search_url,
+                    api_key=config.web_search_api_key,
+                    timeout=config.web_search_timeout,
+                )
+            )
+        if config.code_runner_url and "code_runner" not in self.registry:
+            self.registry.register(
+                CodeRunnerTool.from_http(
+                    config.code_runner_url,
+                    api_key=config.code_runner_api_key,
+                    timeout=config.code_runner_timeout,
+                )
+            )
 
     def run(self, goal: Goal) -> ExecutionResult:
         """Execute Goal → Plan → Agent → Action → Tool → Verify → Learn."""
