@@ -2,7 +2,7 @@
 
 ## 1. Objective
 
-The first version of Daweling is an execution-oriented AI runtime. It should convert a high-level goal into a controlled sequence of reasoning, actions, observations, and verification.
+The first version of Daweling is an execution-oriented AI runtime. It should convert a high-level goal into a controlled sequence of reasoning, actions, observations, verification, recovery, and learning.
 
 ## 2. Core loop
 
@@ -19,10 +19,14 @@ OBSERVE
   ↓
 VERIFY
   ↓
+RECOVER / REPLAN
+  ↓
 RESPOND / CONTINUE
+  ↓
+LEARN
 ```
 
-A failed verification should return the workflow to planning instead of silently producing a confident answer.
+A failed verification should provide evidence for a bounded recovery attempt and, when needed, adaptive replanning instead of silently producing a confident answer.
 
 ## 3. Proposed modules
 
@@ -37,6 +41,7 @@ Examples:
 - Observation
 - VerificationResult
 - WorkflowState
+- bounded recovery
 
 ### `orchestrator`
 Owns workflow execution and coordinates agents and tools.
@@ -45,7 +50,7 @@ Responsibilities:
 - Create execution plans.
 - Select the next action.
 - Track state.
-- Handle failures and retries.
+- Handle failures, recovery, and verification.
 - Enforce approval boundaries.
 
 ### `agents`
@@ -76,6 +81,10 @@ Memory should distinguish between:
 - Working context
 - Project context
 - Long-term user-approved memory
+- Workflow lessons and recovery diagnoses
+
+### `planner`
+Owns task planning, action generation, and adaptive replanning. Adaptive replanning uses observed failures and verification evidence to revise the task sequence rather than blindly repeating the same plan.
 
 ### `verification`
 Checks whether an action or generated result satisfies its requirements.
@@ -106,12 +115,14 @@ The exact interface will be implemented in the foundation code and expanded as r
 
 Autonomy must be proportional to risk. Informational actions can be automated more freely, while consequential external actions should require explicit approval or a clearly configured policy.
 
+Recovery and replanning remain bounded, use registered tools, and preserve the same runtime approval boundaries as normal execution.
+
 The runtime should make actions auditable rather than hiding them inside a single opaque model call.
 
-## 6. First implementation target
+## 6. Current executable milestone
 
-The first executable milestone is deliberately small:
+The execution path now supports:
 
-**Goal → Task Plan → Tool Interface → Observation → Verification → Final Result**
+**Goal → Task Plan → Tool Interface → Observation → Verification → Recovery → Adaptive Replan → Learning**
 
-Once this loop is reliable, specialized agents and richer memory can be added without redesigning the entire project.
+This provides the foundation for progressively more capable agents without redesigning the entire project.
