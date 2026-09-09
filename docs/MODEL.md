@@ -14,8 +14,10 @@ Daweling is intended to become an AI with its own model layer. The first impleme
 - A dependency-free dataset validation/cleaning pipeline.
 - Deterministic train/validation splitting.
 - A reproducible evaluation package with metric primitives and benchmark runners.
+- Evaluation regression checks for comparing current scores with a baseline.
 - An instruction-tuning dataset schema and trainer that masks prompt tokens from the training loss.
 - Instruction tuning can initialize from a compatible pretrained Daweling checkpoint and reports validation loss.
+- Tokenizer and generation tests covering core inference behavior.
 
 ## Current scale
 
@@ -62,6 +64,8 @@ The trainer validates checkpoint configuration compatibility, keeps a validation
 
 The generation layer performs autoregressive next-token inference. A saved checkpoint can be loaded into the matching Daweling Transformer and used for generation.
 
+Python API:
+
 ```python
 from model import DawelingTokenizer, DawelingTransformer, ModelConfig
 from model.generate import GenerationConfig, generate
@@ -73,25 +77,35 @@ text = generate(model, DawelingTokenizer(), "User: Explain photosynthesis simply
 print(text)
 ```
 
+CLI:
+
+```bash
+python -m model.cli data/daweling-instruct.pt "User: Explain photosynthesis simply.\nAssistant:" --greedy --max-new-tokens 64
+```
+
 ## Evaluation
 
 The evaluation layer is deliberately model-interface agnostic. New benchmarks can be added without coupling them to a specific provider or model implementation.
 
 ```python
 from evaluation.runner import EvaluationExample, evaluate_exact_match
+from evaluation.regression import compare_scores
 
 examples = [EvaluationExample("2 + 2", "4")]
 report = evaluate_exact_match(my_model, examples)
-print(report.score)
+regression = compare_scores(0.80, report.score, threshold=0.02)
+print(report.score, regression.passed)
 ```
+
+A regression report treats a score drop within the configured threshold as acceptable and flags larger regressions. This makes benchmark results useful for iterative model development instead of relying on a single snapshot.
 
 ## Roadmap
 
 1. Expand instruction datasets with carefully licensed, high-quality examples.
-2. Add tokenizer tests and a learned subword tokenizer experiment.
-3. Expand evaluation into task suites, regression tracking, safety checks, and contamination checks.
+2. Add a learned subword tokenizer experiment and compare it against the byte tokenizer.
+3. Expand evaluation into task suites, safety checks, contamination checks, and persistent regression tracking.
 4. Add mixed-precision and accelerator-aware training.
-5. Add a dedicated supervised fine-tuning evaluation suite and best-checkpoint selection.
+5. Add supervised fine-tuning evaluation suites and best-checkpoint selection.
 6. Add preference optimization only after supervised instruction tuning and evaluation are reliable.
 7. Scale model and dataset only after evaluation demonstrates useful gains.
 8. Connect the model to Daweling's reasoning, memory, tools, agents, and verification layers.
