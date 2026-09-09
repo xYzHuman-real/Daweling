@@ -10,19 +10,20 @@ Daweling should eventually be able to:
 
 1. Understand a user's goal and context.
 2. Reason about the goal using a bounded structured process.
-3. Break complex goals into actionable plans.
-4. Research and gather information using tools.
-5. Write, run, inspect, and improve software.
-6. Use specialized agents that collaborate on shared work.
-7. Recover from failures and adapt the task plan.
-8. Learn reusable workflow strategies from verified outcomes.
-9. Maintain useful project memory.
-10. Verify important outputs before presenting them.
-11. Execute multi-step workflows with appropriate user approval.
+3. Select an appropriate strategy and specialist for each task.
+4. Break complex goals into actionable plans.
+5. Research and gather information using tools.
+6. Write, run, inspect, and improve software.
+7. Use specialized agents that collaborate on shared work.
+8. Recover from failures and adapt the task plan.
+9. Learn reusable workflow strategies from verified outcomes.
+10. Maintain useful project memory.
+11. Verify important outputs before presenting them.
+12. Execute multi-step workflows with appropriate user approval.
 
 ## Core principle
 
-**Think → Understand → Plan → Act → Verify → Recover → Replan → Learn.**
+**Think → Understand → Select Strategy → Plan → Act → Verify → Recover → Replan → Learn.**
 
 Daweling is not being built as a collection of random AI features. Every component should support the core loop above.
 
@@ -43,13 +44,13 @@ Structured Intelligence Core
              ↓
 Memory + Learned Strategy Guidance
              ↓
-Planning / Reasoning Engine
+Planning Engine
              ↓
-Agent Orchestrator
-  ├── Research Agent ──┐
-  ├── Coding Agent ────┤
-  ├── Writing Agent ───┤→ Shared Work Context
-  └── Analysis Agent ──┘
+Dynamic Agent Routing
+  ├── Research Agent
+  ├── Coding Agent
+  ├── Writing Agent
+  └── Analysis Agent
              ↓
       Tools & External Systems
              ↓
@@ -76,7 +77,7 @@ Daweling will be developed incrementally:
 - **Phase 1 — Core loop:** goal → plan → tool/action → result → verification.
 - **Phase 2 — Agents:** specialized agents behind a common orchestration layer, with bounded collaboration.
 - **Phase 3 — Memory & learning:** durable project/context memory, workflow experiences, and reusable strategy guidance.
-- **Phase 4 — Intelligence:** structured reasoning, strategy selection, stronger verification, and intelligence benchmarks.
+- **Phase 4 — Intelligence:** structured reasoning, strategy selection, dynamic routing, stronger verification, and intelligence benchmarks.
 - **Phase 5 — Product & scale:** user-facing interface, deployment, reliability, model routing, cost optimization, and advanced autonomy.
 
 ## Engineering principles
@@ -91,9 +92,10 @@ Daweling will be developed incrementally:
 - Deterministic control policy over opaque model-controlled execution.
 - Learn from verified outcomes, not from untrusted assumptions.
 - Keep internal reasoning private; expose concise conclusions and evidence instead.
+- Strategy selection may rank registered capabilities, but cannot bypass execution policy.
 
 ## Status
 
 🚧 **Daweling is in active foundation development.**
 
-The runtime now has bounded failure recovery, adaptive replanning, shared-context multi-agent collaboration, peer review, a deterministic decision layer, a learning layer that turns workflow outcomes into bounded planning guidance, and a structured intelligence core that produces concise reasoning evidence before planning. This is still an early foundation—not a frontier-scale model—and the architecture is intentionally being built so model capability can grow without replacing the system around it.
+The runtime now has bounded failure recovery, adaptive replanning, shared-context multi-agent collaboration, peer review, a deterministic decision layer, learned strategy guidance, a structured intelligence core, and dynamic strategy-based agent routing. The new strategy layer scores explicit strategies from task signals, available agent capabilities, and learned guidance while retaining bounded alternatives and failing closed when no viable registered capability exists. This is still an early foundation—not a frontier-scale model—and the architecture is intentionally being built so model capability can grow without replacing the system around it.
