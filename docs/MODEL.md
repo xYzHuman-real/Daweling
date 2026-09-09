@@ -15,8 +15,10 @@ Daweling is intended to become an AI with its own model layer. The first impleme
 - Deterministic train/validation splitting.
 - A reproducible evaluation package with metric primitives and benchmark runners.
 - Evaluation regression checks for comparing current scores with a baseline.
+- Structured evaluation suites for aggregating benchmark groups and applying regression gates.
 - An instruction-tuning dataset schema and trainer that masks prompt tokens from the training loss.
 - Instruction tuning can initialize from a compatible pretrained Daweling checkpoint and reports validation loss.
+- Instruction tuning saves both the final (`last`) checkpoint and the lowest-validation-loss (`best`) checkpoint when a validation split is available.
 - Tokenizer and generation tests covering core inference behavior.
 
 ## Current scale
@@ -58,7 +60,7 @@ python -m training.instruction_tuning \
   --steps 100
 ```
 
-The trainer validates checkpoint configuration compatibility, keeps a validation split separate from training examples, and reports validation loss during training. The default instruction checkpoint is `data/daweling-instruct.pt`.
+The trainer validates checkpoint configuration compatibility, keeps a validation split separate from training examples, and reports validation loss during training. The final checkpoint is written to `data/daweling-instruct.pt`; when validation data exists, the lowest-validation-loss checkpoint is also written as `data/daweling-instruct.best.pt`. The latter is the preferred checkpoint for evaluation and inference because it is selected without using the validation examples for gradient updates.
 
 ## Inference
 
@@ -72,7 +74,7 @@ from model.generate import GenerationConfig, generate
 from model.inference import load_checkpoint
 
 model = DawelingTransformer(ModelConfig(vocab_size=DawelingTokenizer().vocab_size))
-load_checkpoint(model, "data/daweling-instruct.pt")
+load_checkpoint(model, "data/daweling-instruct.best.pt")
 text = generate(model, DawelingTokenizer(), "User: Explain photosynthesis simply.\\nAssistant:", GenerationConfig(max_new_tokens=64, do_sample=False))
 print(text)
 ```
@@ -80,7 +82,7 @@ print(text)
 CLI:
 
 ```bash
-python -m model.cli data/daweling-instruct.pt "User: Explain photosynthesis simply.\nAssistant:" --greedy --max-new-tokens 64
+python -m model.cli data/daweling-instruct.best.pt "User: Explain photosynthesis simply.\nAssistant:" --greedy --max-new-tokens 64
 ```
 
 ## Evaluation
@@ -97,15 +99,15 @@ regression = compare_scores(0.80, report.score, threshold=0.02)
 print(report.score, regression.passed)
 ```
 
-A regression report treats a score drop within the configured threshold as acceptable and flags larger regressions. This makes benchmark results useful for iterative model development instead of relying on a single snapshot.
+Structured suites can combine multiple benchmark groups and optionally compare their aggregate score with a baseline. A regression gate is a development safeguard, not evidence that the model is generally better; benchmark quality and held-out data still matter.
 
 ## Roadmap
 
 1. Expand instruction datasets with carefully licensed, high-quality examples.
 2. Add a learned subword tokenizer experiment and compare it against the byte tokenizer.
-3. Expand evaluation into task suites, safety checks, contamination checks, and persistent regression tracking.
+3. Expand evaluation into safety checks, contamination checks, persistent regression tracking, and broader capability task suites.
 4. Add mixed-precision and accelerator-aware training.
-5. Add supervised fine-tuning evaluation suites and best-checkpoint selection.
+5. Add richer supervised fine-tuning evaluation and experiment tracking around checkpoint selection.
 6. Add preference optimization only after supervised instruction tuning and evaluation are reliable.
 7. Scale model and dataset only after evaluation demonstrates useful gains.
 8. Connect the model to Daweling's reasoning, memory, tools, agents, and verification layers.
