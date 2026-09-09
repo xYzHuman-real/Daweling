@@ -7,6 +7,7 @@ from .history import BenchmarkDelta, ExperimentComparison, compare_experiment_fi
 from .metrics import exact_match, mean_score, perplexity
 from .regression import RegressionReport, compare_scores
 from .release import evaluate_and_select_checkpoints
+from .release_manifest import ReleaseManifest
 from .suites import BenchmarkSpec, EvaluationSuiteReport, run_suite
 
 __all__ = [
@@ -18,6 +19,7 @@ __all__ = [
     "ExperimentComparison",
     "ExperimentRecord",
     "RegressionReport",
+    "ReleaseManifest",
     "compare_experiment_files",
     "compare_experiments",
     "compare_scores",
