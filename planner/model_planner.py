@@ -8,39 +8,44 @@ import json
 from typing import Any
 
 from core.models import Goal, Plan, Task
+from memory.context import ContextBundle
+from memory.context_formatter import build_context_message
 from models import ModelMessage, ModelProvider
 
 
 class ModelPlanner:
-    """Use a ModelProvider to turn a goal into an ordered task plan."""
+    """Use a ModelProvider to turn a goal and relevant memory into a task plan."""
 
     def __init__(self, provider: ModelProvider) -> None:
         self.provider = provider
 
-    def create_plan(self, goal: Goal) -> Plan:
+    def create_plan(self, goal: Goal, context: ContextBundle | None = None) -> Plan:
         if not goal.description.strip():
             raise ValueError("Goal description cannot be empty")
 
-        response = self.provider.generate(
-            [
-                ModelMessage(
-                    role="system",
-                    content=(
-                        "You are Daweling's planning engine. Return JSON only: "
-                        "{\"tasks\":[{\"id\":\"...\",\"description\":\"...\"}]} . "
-                        "Create a minimal ordered task list. Do not execute actions."
-                    ),
+        messages = [
+            ModelMessage(
+                role="system",
+                content=(
+                    "You are Daweling's planning engine. Return JSON only: "
+                    "{\"tasks\":[{\"id\":\"...\",\"description\":\"...\"}]} . "
+                    "Create a minimal ordered task list. Do not execute actions."
                 ),
-                ModelMessage(
-                    role="user",
-                    content=json.dumps(
-                        {"goal": goal.description, "context": goal.context},
-                        ensure_ascii=False,
-                    ),
+            )
+        ]
+        if context is not None:
+            messages.append(build_context_message(context))
+        messages.append(
+            ModelMessage(
+                role="user",
+                content=json.dumps(
+                    {"goal": goal.description, "context": goal.context},
+                    ensure_ascii=False,
                 ),
-            ]
+            )
         )
 
+        response = self.provider.generate(messages)
         data = self._parse_json(response.content)
         raw_tasks = data.get("tasks")
         if not isinstance(raw_tasks, list) or not raw_tasks:
