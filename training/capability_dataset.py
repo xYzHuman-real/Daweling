@@ -11,15 +11,11 @@ from typing import Any, Iterable
 import torch
 
 from model import DawelingTokenizer
-
 from .curriculum import CurriculumExample, CurriculumScheduler, CurriculumStage
-from .instruction_tuning import InstructionExample, make_example
 
 
 @dataclass(frozen=True)
 class CapabilityExample:
-    """A normalized example for one Daweling capability stage."""
-
     stage: CurriculumStage
     text: str = ""
     instruction: str = ""
@@ -40,13 +36,12 @@ def _stage(value: Any) -> CurriculumStage:
         return value
     raw = str(value or "language").strip().casefold().replace("-", "_").replace(" ", "_")
     for item in CurriculumStage:
-        if raw in {item.name.casefold(), str(int(item))}:
+        if raw == item.name.casefold() or raw == str(item.value).casefold():
             return item
     raise ValueError(f"invalid capability stage: {value!r}")
 
 
 def read_capability_examples(path: Path) -> tuple[CapabilityExample, ...]:
-    """Read JSONL capability examples with strict, deterministic validation."""
     result: list[CapabilityExample] = []
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
@@ -78,10 +73,7 @@ def read_capability_examples(path: Path) -> tuple[CapabilityExample, ...]:
     return tuple(result)
 
 
-def split_capability_examples(
-    examples: Iterable[CapabilityExample], validation_ratio: float = 0.1, seed: int = 0
-) -> tuple[tuple[CapabilityExample, ...], tuple[CapabilityExample, ...]]:
-    """Split deterministically while preserving the capability mixture."""
+def split_capability_examples(examples: Iterable[CapabilityExample], validation_ratio: float = 0.1, seed: int = 0) -> tuple[tuple[CapabilityExample, ...], tuple[CapabilityExample, ...]]:
     items = tuple(examples)
     if not items:
         raise ValueError("capability examples must not be empty")
@@ -98,32 +90,32 @@ def split_capability_examples(
 
 def _encode(example: CapabilityExample, tokenizer: DawelingTokenizer, max_length: int) -> tuple[torch.Tensor, torch.Tensor]:
     if example.stage is CurriculumStage.INSTRUCTION:
-        return make_example(InstructionExample(example.instruction, example.response), tokenizer, max_length)
+        prompt_ids = tokenizer.encode(f"User: {example.instruction}\nAssistant: ", add_bos=True, add_eos=False)
+        response_ids = tokenizer.encode(example.response, add_bos=False, add_eos=True)
+        ids = (prompt_ids + response_ids)[: max_length + 1]
+        if len(ids) < 2:
+            raise ValueError("instruction example is too short")
+        inputs = torch.tensor(ids[:-1], dtype=torch.long)
+        targets = torch.tensor(ids[1:], dtype=torch.long)
+        prompt_targets = min(max(0, len(prompt_ids) - 1), targets.numel())
+        targets[:prompt_targets] = -100
+        if torch.all(targets == -100):
+            raise ValueError("instruction example contains no response tokens inside max_length")
+        return inputs, targets
     ids = tokenizer.encode(example.text, add_bos=True, add_eos=True)[: max_length + 1]
     if len(ids) < 2:
         raise ValueError("capability example is too short")
     return torch.tensor(ids[:-1], dtype=torch.long), torch.tensor(ids[1:], dtype=torch.long)
 
 
-def capability_batch(
-    examples: Iterable[CapabilityExample],
-    tokenizer: DawelingTokenizer,
-    max_length: int,
-    batch_size: int,
-    epoch: int,
-    *,
-    seed: int = 0,
-    scheduler: CurriculumScheduler | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, CurriculumStage]:
-    """Build a deterministic weighted batch from the curriculum reached at epoch."""
-    if batch_size <= 0:
-        raise ValueError("batch_size must be greater than zero")
-    if max_length <= 0:
-        raise ValueError("max_length must be greater than zero")
+def capability_batch(examples: Iterable[CapabilityExample], tokenizer: DawelingTokenizer, max_length: int, batch_size: int, epoch: int, *, seed: int = 0, scheduler: CurriculumScheduler | None = None) -> tuple[torch.Tensor, torch.Tensor, CurriculumStage]:
+    if batch_size <= 0 or max_length <= 0:
+        raise ValueError("batch_size and max_length must be greater than zero")
     items = tuple(examples)
-    curriculum = tuple(item.curriculum for item in items)
-    mix = (scheduler or CurriculumScheduler()).batch(curriculum, epoch)
-    eligible = [item for item in items if item.stage <= mix.stage and item.weight > 0]
+    if not items:
+        raise ValueError("capability examples must not be empty")
+    mix = (scheduler or CurriculumScheduler()).batch(tuple(item.curriculum for item in items), epoch)
+    eligible = [item for item in items if item.stage.value <= mix.stage.value and item.weight > 0]
     if not eligible:
         raise ValueError(f"no capability examples available through stage {mix.stage.name}")
     encoded = [_encode(item, tokenizer, max_length) for item in eligible]
