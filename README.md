@@ -19,7 +19,7 @@ Daweling should eventually be able to:
 9. Learn reusable workflow strategies from verified outcomes.
 10. Maintain useful project memory.
 11. Verify important outputs using explicit evidence before presenting them.
-12. Measure intelligence and system capability with repeatable evaluations.
+12. Measure intelligence and system capability with repeatable evaluations and regression gates.
 13. Execute multi-step workflows with appropriate user approval.
 
 ## Core principle
@@ -48,32 +48,26 @@ Memory + Learned Strategy Guidance
 Planning Engine
              ↓
 Dynamic Agent Routing
-  ├── Research Agent
-  ├── Coding Agent
-  ├── Writing Agent
-  └── Analysis Agent
              ↓
-      Tools & External Systems
+Tools & External Systems
              ↓
-      Evidence Verification
+Evidence Verification
              ↓
-      Deterministic Decision Engine
-        ├── Review
-        ├── Recover
-        ├── Replan
-        ├── Complete
-        └── Fail
+Deterministic Decision Engine
+             ├── Review
+             ├── Recover
+             ├── Replan
+             ├── Complete
+             └── Fail
              ↓
-      Experience Recorder
+Experience Recorder
              ↓
-       Learned Guidance
+Learned Guidance
              ↺
-      Intelligence Evaluation
-        ├── Reasoning
-        ├── Planning
-        ├── Routing
-        ├── Verification
-        └── Recovery
+Intelligence Evaluation
+  ├── Capability Scores
+  ├── Weighted Aggregate
+  └── Regression Gates
 ```
 
 ## Development strategy
@@ -100,10 +94,10 @@ Daweling will be developed incrementally:
 - Learn from verified outcomes, not from untrusted assumptions.
 - Keep internal reasoning private; expose concise conclusions and evidence instead.
 - Verification must rely on explicit evidence rather than treating model text as proof.
-- Intelligence improvements must be measurable with repeatable evaluation cases.
+- Intelligence improvements must be measurable with repeatable evaluation cases and regression thresholds.
 
 ## Status
 
 🚧 **Daweling is in active foundation development.**
 
-The runtime now has bounded failure recovery, adaptive replanning, shared-context multi-agent collaboration, peer review, a deterministic decision layer, learned strategy guidance, a structured intelligence core, dynamic strategy-based agent routing, evidence-based verification, and capability-level intelligence evaluation. The evaluation layer measures individual capabilities and weighted aggregate performance without requiring private reasoning traces. This is still an early foundation—not a frontier-scale model—and the architecture is intentionally being built so model capability can grow without replacing the system around it.
+The runtime now has bounded failure recovery, adaptive replanning, shared-context multi-agent collaboration, peer review, a deterministic decision layer, learned strategy guidance, a structured intelligence core, dynamic strategy-based agent routing, evidence-based verification, capability-level intelligence evaluation, and a standard intelligence benchmark suite with capability regression gates. This is still an early foundation—not a frontier-scale model—and the architecture is intentionally being built so model capability can grow without replacing the system around it.
