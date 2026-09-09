@@ -24,6 +24,9 @@ class TrainingRunManifest:
     checkpoint_sha256: str | None = None
     parent_checkpoint: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    last_step: int = 0
+    best_validation_loss: float | None = None
+    best_step: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
