@@ -53,10 +53,5 @@ def make_run_id(*, stage: str, dataset_sha256: str | None, model_config: dict[st
     """Build a stable experiment identity; target step count is intentionally resumable."""
     identity_config = dict(training_config)
     identity_config.pop("steps", None)
-    payload = json.dumps(
-        {"stage": stage, "dataset_sha256": dataset_sha256, "model_config": model_config, "training_config": identity_config, "seed": seed},
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    payload = json.dumps({"stage": stage, "dataset_sha256": dataset_sha256, "model_config": model_config, "training_config": identity_config, "seed": seed}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
