@@ -13,11 +13,15 @@ UNDERSTAND
   ↓
 PLAN
   ↓
+COLLABORATE
+  ↓
 EXECUTE
   ↓
 OBSERVE
   ↓
 VERIFY
+  ↓
+DEBATE / REVIEW
   ↓
 RECOVER / REPLAN
   ↓
@@ -26,7 +30,7 @@ RESPOND / CONTINUE
 LEARN
 ```
 
-A failed verification should provide evidence for a bounded recovery attempt and, when needed, adaptive replanning instead of silently producing a confident answer.
+Important work products can be independently challenged before acceptance. Review is bounded and does not replace the runtime's verification layer.
 
 ## 3. Proposed modules
 
@@ -62,7 +66,7 @@ Initial candidates:
 - Writing
 - Analysis
 
-Agents should not directly own global workflow state.
+Agents can collaborate through bounded shared work context. Important outputs can also be submitted to independent peer review before acceptance.
 
 ### `tools`
 Adapters for external capabilities such as:
@@ -115,7 +119,7 @@ The exact interface will be implemented in the foundation code and expanded as r
 
 Autonomy must be proportional to risk. Informational actions can be automated more freely, while consequential external actions should require explicit approval or a clearly configured policy.
 
-Recovery and replanning remain bounded, use registered tools, and preserve the same runtime approval boundaries as normal execution.
+Recovery, replanning, collaboration, and peer review remain bounded and preserve the same runtime approval boundaries as normal execution.
 
 The runtime should make actions auditable rather than hiding them inside a single opaque model call.
 
@@ -123,6 +127,6 @@ The runtime should make actions auditable rather than hiding them inside a singl
 
 The execution path now supports:
 
-**Goal → Task Plan → Tool Interface → Observation → Verification → Recovery → Adaptive Replan → Learning**
+**Goal → Task Plan → Multi-Agent Collaboration → Tool Interface → Observation → Verification → Peer Review → Recovery → Adaptive Replan → Learning**
 
 This provides the foundation for progressively more capable agents without redesigning the entire project.
