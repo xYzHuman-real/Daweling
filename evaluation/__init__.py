@@ -4,7 +4,9 @@ from .checkpoint_evaluator import evaluate_checkpoint
 from .checkpoint_selection import CheckpointCandidate, CheckpointSelection, select_checkpoint
 from .experiment import ExperimentRecord, load_experiment, save_experiment
 from .history import BenchmarkDelta, ExperimentComparison, compare_experiment_files, compare_experiments
+from .instruction import InstructionCase, InstructionReport, InstructionResult, run_instruction_evaluation
 from .metrics import exact_match, mean_score, perplexity
+from .reasoning import ReasoningCase, ReasoningReport, ReasoningResult, run_reasoning_evaluation
 from .regression import RegressionReport, compare_scores
 from .release import evaluate_and_select_checkpoints
 from .release_manifest import ReleaseManifest
@@ -18,6 +20,12 @@ __all__ = [
     "EvaluationSuiteReport",
     "ExperimentComparison",
     "ExperimentRecord",
+    "InstructionCase",
+    "InstructionReport",
+    "InstructionResult",
+    "ReasoningCase",
+    "ReasoningReport",
+    "ReasoningResult",
     "RegressionReport",
     "ReleaseManifest",
     "compare_experiment_files",
@@ -29,6 +37,8 @@ __all__ = [
     "load_experiment",
     "mean_score",
     "perplexity",
+    "run_instruction_evaluation",
+    "run_reasoning_evaluation",
     "run_suite",
     "save_experiment",
     "select_checkpoint",
