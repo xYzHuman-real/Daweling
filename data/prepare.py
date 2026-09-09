@@ -72,17 +72,18 @@ def prepare_dataset(
 
     raw_examples: list[dict[str, Any]] = []
     invalid = 0
-    for line in source_path.open("r", encoding="utf-8"):
-        try:
-            example = json.loads(line)
-        except json.JSONDecodeError:
-            invalid += 1
-            continue
-        ok, _ = validate_example(example)
-        if not ok:
-            invalid += 1
-            continue
-        raw_examples.append(normalize_example(example))
+    with source_path.open("r", encoding="utf-8") as source:
+        for line in source:
+            try:
+                example = json.loads(line)
+            except json.JSONDecodeError:
+                invalid += 1
+                continue
+            ok, _ = validate_example(example)
+            if not ok:
+                invalid += 1
+                continue
+            raw_examples.append(normalize_example(example))
 
     quality_rejected = 0
     quality_issues: Counter[str] = Counter()
@@ -96,13 +97,10 @@ def prepare_dataset(
         example["text"] = result.normalized_text
         quality_examples.append(example)
 
-    contamination_rejected = 0
-    contamination_ids: Counter[str] = Counter()
     benchmarks = list(contamination_benchmarks or [])
-    contaminated_indices = {match.example_index for match in find_benchmark_contamination(quality_examples, benchmarks)}
-    for match in find_benchmark_contamination(quality_examples, benchmarks):
-        contamination_ids[match.benchmark_id] += 1
-    contamination_rejected = len(contaminated_indices)
+    contamination_matches = find_benchmark_contamination(quality_examples, benchmarks)
+    contaminated_indices = {match.example_index for match in contamination_matches}
+    contamination_ids: Counter[str] = Counter(match.benchmark_id for match in contamination_matches)
 
     seen: set[str] = set()
     valid = duplicates = 0
@@ -139,7 +137,7 @@ def prepare_dataset(
         sources=sources or [],
         metadata=metadata or {},
         quality_rejected_count=quality_rejected,
-        contamination_rejected_count=contamination_rejected,
+        contamination_rejected_count=len(contaminated_indices),
         quality_issues=dict(sorted(quality_issues.items())),
         contamination_benchmark_ids=dict(sorted(contamination_ids.items())),
     )
