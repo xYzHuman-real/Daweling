@@ -1,23 +1,22 @@
 """Minimal execution runtime for Daweling's first core loop."""
 
-from typing import Any, Callable, Dict, Iterable
+from typing import Iterable
 
-from .models import Action, Goal, Observation, Plan, Task, VerificationResult, WorkflowState
+from tools.base import ToolResult
+from tools.registry import ToolRegistry
 
-
-Tool = Callable[[Dict[str, Any]], Any]
+from .models import Action, Observation, Plan, Task, VerificationResult, WorkflowState
 
 
 class Runtime:
     """Execute a plan through registered tools and verify each observation."""
 
-    def __init__(self, tools: Dict[str, Tool] | None = None) -> None:
-        self.tools: Dict[str, Tool] = tools or {}
+    def __init__(self, registry: ToolRegistry | None = None) -> None:
+        self.registry = registry or ToolRegistry()
 
-    def register_tool(self, name: str, tool: Tool) -> None:
-        if not name.strip():
-            raise ValueError("Tool name cannot be empty")
-        self.tools[name] = tool
+    def register_tool(self, tool) -> None:
+        """Register a BaseTool with this runtime."""
+        self.registry.register(tool)
 
     def execute(self, plan: Plan, actions: Iterable[Action]) -> list[Observation]:
         observations: list[Observation] = []
@@ -25,8 +24,8 @@ class Runtime:
         for action in actions:
             task = self._find_task(plan, action.task_id)
             task.status = WorkflowState.RUNNING
+            tool = self.registry.get(action.tool)
 
-            tool = self.tools.get(action.tool)
             if tool is None:
                 observation = Observation(
                     task_id=action.task_id,
@@ -35,11 +34,14 @@ class Runtime:
                 )
             else:
                 try:
-                    output = tool(action.input)
+                    result = tool(action.input)
+                    if not isinstance(result, ToolResult):
+                        result = ToolResult.ok(result)
                     observation = Observation(
                         task_id=action.task_id,
-                        success=True,
-                        output=output,
+                        success=result.success,
+                        output=result.output,
+                        error=result.error,
                     )
                 except Exception as exc:
                     observation = Observation(
