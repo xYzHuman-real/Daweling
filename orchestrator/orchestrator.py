@@ -1,6 +1,6 @@
 """Application-level orchestration for Daweling's core execution loop."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Iterable
 
 from core.models import Action, Goal, Observation, Plan, VerificationResult
@@ -18,6 +18,7 @@ class ExecutionResult:
     plan: Plan
     observations: list[Observation]
     verifications: list[VerificationResult]
+    agent_work: dict[str, object] = field(default_factory=dict)
 
     @property
     def success(self) -> bool:
@@ -40,7 +41,7 @@ class Orchestrator:
         """Run a goal through Plan → Action → Execute → Verify."""
         plan = self.planner.create_plan(goal)
         actions = list(action_builder(plan))
-        self._validate_actions(plan, actions)
+        self.validate_actions(plan, actions)
 
         observations = self.runtime.execute(plan, actions)
         verifications = [self.runtime.verify(observation) for observation in observations]
@@ -52,10 +53,13 @@ class Orchestrator:
         )
 
     @staticmethod
-    def _validate_actions(plan: Plan, actions: list[Action]) -> None:
+    def validate_actions(plan: Plan, actions: list[Action]) -> None:
+        """Validate that generated actions reference planned tasks and a tool name."""
         task_ids = {task.id for task in plan.tasks}
         for action in actions:
             if action.task_id not in task_ids:
                 raise ValueError(f"Action references unknown task: {action.task_id}")
             if not action.tool.strip():
                 raise ValueError(f"Action tool cannot be empty: {action.task_id}")
+
+    _validate_actions = validate_actions
