@@ -5,13 +5,13 @@ from typing import Any, Callable
 from core.policy import ToolRisk
 
 from .base import BaseTool, ToolResult
-
+from .http_backends import HttpSearchBackend
 
 SearchBackend = Callable[[str, int], Any]
 
 
 class WebSearchTool(BaseTool):
-    """Expose a pluggable web-search backend through Daweling's tool contract."""
+    """Expose a configured web-search backend through Daweling's tool contract."""
 
     name = "web_search"
     description = "Search the web for current information and return structured results."
@@ -23,6 +23,10 @@ class WebSearchTool(BaseTool):
         self.backend = backend
         self.max_results = max_results
 
+    @classmethod
+    def from_http(cls, url: str, api_key: str | None = None, timeout: float = 10.0, max_results: int = 5) -> "WebSearchTool":
+        return cls(HttpSearchBackend(url, timeout=timeout, api_key=api_key), max_results=max_results)
+
     def run(self, input_data: dict[str, Any]) -> ToolResult:
         query = str(input_data.get("query", "")).strip()
         if not query:
@@ -33,12 +37,10 @@ class WebSearchTool(BaseTool):
                 query=query,
                 capability="web_search",
             )
-
         try:
             results = self.backend(query, self.max_results)
         except Exception as exc:
             return ToolResult.fail(str(exc), query=query)
-
         return ToolResult.ok(results, query=query, result_count=self._count(results))
 
     @staticmethod
