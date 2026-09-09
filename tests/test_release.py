@@ -8,6 +8,9 @@ from evaluation.release_manifest import ReleaseManifest
 
 def test_release_pipeline_evaluates_all_candidates_and_selects_best(monkeypatch, tmp_path):
     scores = {"data/a.pt": "wrong", "data/b.pt": "4"}
+    for path in (Path("data/a.pt"), Path("data/b.pt")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(path.name.encode())
 
     def fake_generate(path, prompt, *, config, device):
         return scores[str(path)]
@@ -26,8 +29,11 @@ def test_release_pipeline_evaluates_all_candidates_and_selects_best(monkeypatch,
     assert load_experiment(tmp_path / "b.json").score == 1.0
 
 
-def test_release_pipeline_rejects_regression_failures(monkeypatch):
+def test_release_pipeline_rejects_regression_failures(monkeypatch, tmp_path):
     scores = {"data/a.pt": "4", "data/b.pt": "wrong"}
+    for path in (Path("data/a.pt"), Path("data/b.pt")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(path.name.encode())
 
     def fake_generate(path, prompt, *, config, device):
         return scores[str(path)]
