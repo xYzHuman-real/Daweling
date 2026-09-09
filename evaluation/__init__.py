@@ -1,5 +1,6 @@
 """Evaluation primitives and suite runners for Daweling model development."""
 
+from .experiment import ExperimentRecord, load_experiment, save_experiment
 from .metrics import exact_match, mean_score, perplexity
 from .regression import RegressionReport, compare_scores
 from .suites import BenchmarkSpec, EvaluationSuiteReport, run_suite
@@ -7,10 +8,13 @@ from .suites import BenchmarkSpec, EvaluationSuiteReport, run_suite
 __all__ = [
     "BenchmarkSpec",
     "EvaluationSuiteReport",
+    "ExperimentRecord",
     "RegressionReport",
     "compare_scores",
     "exact_match",
+    "load_experiment",
     "mean_score",
     "perplexity",
     "run_suite",
+    "save_experiment",
 ]
