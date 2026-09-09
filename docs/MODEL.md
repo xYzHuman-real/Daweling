@@ -1,124 +1,97 @@
-# Daweling Model
+# Daweling Model Foundation
 
-Daweling is intended to become an AI with its own model layer. The first implementation is a small decoder-only Transformer designed for local experimentation and owned training.
+Daweling owns a small decoder-only Transformer foundation model rather than treating an external provider as its identity.
 
-## What exists now
+## Current model
 
-- A deterministic UTF-8 byte tokenizer owned by Daweling.
-- A configurable causal Transformer implemented with PyTorch.
-- Weight tying between token embeddings and the language-model head.
-- A minimal AdamW pretraining loop with gradient clipping.
-- Checkpoint serialization and an autoregressive inference/generation API.
-- Temperature, top-k, greedy generation, context-window handling, and EOS stopping.
-- Safe checkpoint loading and model configuration validation.
-- A dependency-free dataset validation/cleaning pipeline.
-- Deterministic train/validation splitting.
-- A reproducible evaluation package with metric primitives and benchmark runners.
-- Evaluation regression checks for comparing current scores with a baseline.
-- Structured evaluation suites for aggregating benchmark groups and applying regression gates.
-- Weighted benchmark groups so important capabilities can contribute more to the aggregate score.
-- JSON-compatible evaluation report snapshots for experiment tracking.
-- An instruction-tuning dataset schema and trainer that masks prompt tokens from the training loss.
-- Instruction tuning can initialize from a compatible pretrained Daweling checkpoint and reports validation loss.
-- Instruction tuning saves both the final (`last`) checkpoint and the lowest-validation-loss (`best`) checkpoint when a validation split is available.
-- Tokenizer and generation tests covering core inference behavior.
+The repository contains a dependency-light PyTorch implementation with:
 
-## Current scale
+- deterministic UTF-8 byte tokenization
+- decoder-only Transformer blocks
+- tied input/output embeddings
+- AdamW optimization
+- autoregressive inference
+- checkpoint save/load
+- dataset validation and cleaning
+- deterministic dataset splitting
+- reproducible training-run manifests
+- deterministic token batching
+- validation-loss measurement
+- benchmark and regression evaluation
+- checkpoint selection
 
-The default experiment is intentionally small: 4 Transformer blocks, 4 attention heads, 256-dimensional hidden states, 256-token context, and a 260-token byte/special-token vocabulary.
+The default small experiment is intentionally modest: 4 Transformer blocks, 4 attention heads, hidden size 256, context length 256, and a small byte/special-token vocabulary.
 
-This is **not** intended to compete with frontier models yet. It is the first trainable foundation from which Daweling can iterate on data, architecture, evaluation, and scale.
+This is **not a frontier model**. It is the foundation for building Daweling's own training, evaluation, data, and inference stack.
 
-## Data development
+## Reproducible training pipeline
 
-Pretraining examples use newline-delimited JSON with at least `text` and `source` fields. Instruction-tuning examples use `instruction` and `response` fields. Optional metadata can record provenance, licensing, language, and quality.
+The intended development loop is:
+
+```text
+raw dataset
+    ↓
+validation + normalization + deduplication
+    ↓
+dataset manifest
+    ↓
+deterministic train/validation split
+    ↓
+token batching
+    ↓
+training
+    ↓
+periodic validation loss
+    ↓
+checkpoint + training-run manifest
+    ↓
+benchmark evaluation
+    ↓
+regression gate
+    ↓
+best accepted checkpoint
+```
+
+### Dataset preparation
 
 ```bash
-python data/prepare.py input.jsonl cleaned.jsonl
+python data/prepare.py input.jsonl cleaned.jsonl --manifest data/manifests/v1.json --version v1
 ```
 
-Keep evaluation examples separate from training data. Do not commit private data, secrets, or material that Daweling does not have permission to use.
+The manifest records dataset version, input/output SHA-256 fingerprints, valid/duplicate/invalid counts, preprocessing configuration, and provenance metadata.
 
-## Training
-
-Install the model dependency set:
+### Train
 
 ```bash
-pip install -r requirements-model.txt
+python -m training.train corpus.txt --output data/daweling-small.pt --steps 100 --seed 0
 ```
 
-Prepare a UTF-8 text corpus and run:
+For a separate validation corpus:
 
 ```bash
-python -m training.train path/to/corpus.txt --steps 100
+python -m training.train corpus.txt --validation-text validation.txt --output data/daweling-small.pt --steps 100 --batch-size 4 --validation-interval 10
 ```
 
-Then instruction-tune from the pretrained checkpoint:
+If a prepared dataset manifest is available, pass it with `--dataset-manifest`. The resulting checkpoint receives a sidecar training manifest containing the dataset fingerprint, model configuration, training configuration, seed, checkpoint fingerprint, and source text fingerprints.
 
-```bash
-python -m training.instruction_tuning \
-  path/to/instructions.jsonl \
-  --pretrained data/daweling-small.pt \
-  --steps 100
+## Validation
+
+`training.validation.evaluate_loss` computes token-weighted mean cross-entropy over validation batches without changing model weights. Validation loss is kept separate from training loss so experiments can detect overfitting instead of selecting checkpoints only from the final training step.
+
+## Experiment lineage
+
+`training.experiment.TrainingRunManifest` provides a stable machine-readable link between:
+
+```text
+dataset → configuration → seed → checkpoint
 ```
 
-The trainer validates checkpoint configuration compatibility, keeps a validation split separate from training examples, and reports validation loss during training. The final checkpoint is written to `data/daweling-instruct.pt`; when validation data exists, the lowest-validation-loss checkpoint is also written as `data/daweling-instruct.best.pt`. The latter is the preferred checkpoint for evaluation and inference because it is selected without using the validation examples for gradient updates.
+Run IDs are derived deterministically from the stage, dataset fingerprint, model configuration, training configuration, and seed. This makes repeated experiments comparable and makes accidental configuration drift visible.
 
-## Inference
+## Evaluation and release
 
-The generation layer performs autoregressive next-token inference. A saved checkpoint can be loaded into the matching Daweling Transformer and used for generation.
+Evaluation records can be stored independently from checkpoints. The evaluation layer supports benchmark suites, regression checks, experiment history, and policy-driven checkpoint selection. A release candidate should be accepted only when its evaluation passes the configured regression policy.
 
-Python API:
+## Data and model ownership
 
-```python
-from model import DawelingTokenizer, DawelingTransformer, ModelConfig
-from model.generate import GenerationConfig, generate
-from model.inference import load_checkpoint
-
-model = DawelingTransformer(ModelConfig(vocab_size=DawelingTokenizer().vocab_size))
-load_checkpoint(model, "data/daweling-instruct.best.pt")
-text = generate(model, DawelingTokenizer(), "User: Explain photosynthesis simply.\\nAssistant:", GenerationConfig(max_new_tokens=64, do_sample=False))
-print(text)
-```
-
-CLI:
-
-```bash
-python -m model.cli data/daweling-instruct.best.pt "User: Explain photosynthesis simply.\nAssistant:" --greedy --max-new-tokens 64
-```
-
-## Evaluation
-
-The evaluation layer is deliberately model-interface agnostic. New benchmarks can be added without coupling them to a specific provider or model implementation.
-
-```python
-from evaluation import BenchmarkSpec, run_suite
-from evaluation.benchmarks import BenchmarkCase
-
-suite = run_suite(
-    "core",
-    my_model,
-    [
-        BenchmarkSpec("math", [BenchmarkCase("add", "2 + 2", "4")], weight=2.0),
-        BenchmarkSpec("identity", [BenchmarkCase("name", "model", "Daweling")]),
-    ],
-    baseline_score=0.80,
-    regression_threshold=0.02,
-)
-
-print(suite.score)
-print(suite.to_dict())
-```
-
-Weighted suites prevent every benchmark group from automatically having equal importance. Reports can be converted to plain dictionaries for JSON experiment logs. A regression gate is a development safeguard, not evidence that the model is generally better; benchmark quality and held-out data still matter.
-
-## Roadmap
-
-1. Expand instruction datasets with carefully licensed, high-quality examples.
-2. Add a learned subword tokenizer experiment and compare it against the byte tokenizer.
-3. Expand evaluation into safety checks, contamination checks, persistent regression tracking, and broader capability task suites.
-4. Add mixed-precision and accelerator-aware training.
-5. Add richer supervised fine-tuning evaluation and experiment tracking around checkpoint selection.
-6. Add preference optimization only after supervised instruction tuning and evaluation are reliable.
-7. Scale model and dataset only after evaluation demonstrates useful gains.
-8. Connect the model to Daweling's reasoning, memory, tools, agents, and verification layers.
+External model providers may be used temporarily for product/runtime development, but they are not the long-term definition of Daweling. The long-term objective is to improve Daweling-owned data, training, evaluation, inference, and model capabilities as compute and research resources grow.
