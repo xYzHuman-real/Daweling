@@ -16,7 +16,7 @@ def _rows_sha256(rows: list[dict]) -> str:
 
 @dataclass(frozen=True)
 class DatasetPartitions:
-    """Text examples separated into deterministic train and validation partitions."""
+    """Text examples plus preserved metadata for deterministic training policies."""
 
     train_texts: tuple[str, ...]
     validation_texts: tuple[str, ...]
@@ -24,6 +24,8 @@ class DatasetPartitions:
     validation_ratio: float
     train_sha256: str
     validation_sha256: str
+    train_rows: tuple[dict, ...] = ()
+    validation_rows: tuple[dict, ...] = ()
 
     @property
     def train_count(self) -> int:
@@ -45,4 +47,6 @@ def load_partitions(path: str | Path, *, validation_ratio: float = 0.1, seed: in
         validation_ratio=validation_ratio,
         train_sha256=_rows_sha256(train),
         validation_sha256=_rows_sha256(validation),
+        train_rows=tuple(train),
+        validation_rows=tuple(validation),
     )
