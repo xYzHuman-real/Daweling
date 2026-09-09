@@ -1,4 +1,4 @@
-"""Minimal local pretraining loop for the first Daweling model."""
+"""Reproducible local pretraining loop for the first Daweling model."""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ def train(
     seed: int = 0,
     dataset_manifest_path: Path | None = None,
 ) -> TrainingRunManifest:
+    """Train a model and persist its exact data/config lineage beside the checkpoint."""
     if steps <= 0:
         raise ValueError("steps must be greater than zero")
     torch.manual_seed(seed)
@@ -55,17 +56,42 @@ def train(
         if step == 0 or (step + 1) % 10 == 0:
             print(f"step={step + 1} loss={loss.item():.4f}")
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"config": config.__dict__, "state_dict": model.state_dict()}, output_path)
-
     dataset_sha256 = None
     if dataset_manifest_path is not None:
         manifest = DatasetManifest.load(dataset_manifest_path)
         dataset_sha256 = manifest.output_sha256
 
-    training_config = {"steps": steps, "learning_rate": learning_rate, "sequence_length": config.max_sequence_length}
+    training_config = {
+        "steps": steps,
+        "learning_rate": learning_rate,
+        "sequence_length": config.max_sequence_length,
+        "optimizer": "AdamW",
+        "gradient_clip_norm": 1.0,
+    }
     model_config = config.__dict__
-    run_id = make_run_id(stage="pretraining", dataset_sha256=dataset_sha256, model_config=model_config, training_config=training_config, seed=seed)
+    run_id = make_run_id(
+        stage="pretraining",
+        dataset_sha256=dataset_sha256,
+        model_config=model_config,
+        training_config=training_config,
+        seed=seed,
+    )
+
+    # Store the lineage in the checkpoint itself as well as a human-readable sidecar.
+    checkpoint = {
+        "format_version": 2,
+        "config": model_config,
+        "state_dict": model.state_dict(),
+        "stage": "pretraining",
+        "run_id": run_id,
+        "seed": seed,
+        "training_config": training_config,
+        "dataset_manifest": str(dataset_manifest_path) if dataset_manifest_path else None,
+        "dataset_sha256": dataset_sha256,
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(checkpoint, output_path)
+
     lineage = TrainingRunManifest(
         run_id=run_id,
         stage="pretraining",
