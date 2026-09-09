@@ -22,9 +22,9 @@ OBSERVE
 VERIFY
   ↓
 DECIDE
-  ├── REVIEW ──→ DECIDE
-  ├── RECOVER ─→ DECIDE
-  ├── REPLAN ──→ DECIDE
+  ├── REVIEW ──→ VERIFY / DECIDE
+  ├── RECOVER ─→ EXECUTE / VERIFY / DECIDE
+  ├── REPLAN ──→ COLLABORATE / EXECUTE / VERIFY / DECIDE
   ├── COMPLETE
   └── FAIL
   ↓
@@ -49,6 +49,7 @@ Examples:
 - VerificationResult
 - WorkflowState
 - bounded recovery
+- deterministic workflow decisions
 
 ### `orchestrator`
 Owns workflow execution and coordinates agents and tools.
@@ -61,6 +62,8 @@ Responsibilities:
 - Enforce approval boundaries.
 
 `orchestrator/decision.py` provides the unified decision layer. `DecisionEngine` selects one of `EXECUTE`, `REVIEW`, `RECOVER`, `REPLAN`, `COMPLETE`, or `FAIL` from explicit workflow evidence and bounded budgets.
+
+`orchestrator/loop.py` provides the bounded decision-driven control loop. It can execute a plan, recover failed actions, request adaptive replanning, and pass verified work through peer review before completion.
 
 ### `agents`
 Specialized capabilities exposed through a common interface.
@@ -134,6 +137,6 @@ The runtime should make actions auditable rather than hiding them inside a singl
 
 The execution foundation now supports:
 
-**Goal → Task Plan → Multi-Agent Collaboration → Tool Interface → Observation → Verification → Deterministic Decision → Peer Review → Recovery → Adaptive Replan → Learning**
+**Goal → Task Plan → Multi-Agent Collaboration → Tool Interface → Observation → Verification → Deterministic Decision → Peer Review → Bounded Recovery → Adaptive Replan → Learning**
 
-The next integration step is to let the decision engine drive bounded recovery and adaptive replanning loops end-to-end rather than exposing those capabilities only as separate APIs.
+The decision-driven loop now connects these stages behind explicit recovery and replan budgets. The next integration step is to connect the existing model-driven adaptive planner and recovery adapter directly to this loop for an end-to-end model-assisted workflow.
