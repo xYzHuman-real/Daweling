@@ -51,3 +51,28 @@ def test_model_planner_rejects_duplicate_ids():
         assert "duplicate" in str(exc).lower()
     else:
         raise AssertionError("Expected duplicate ids to fail")
+
+
+def test_model_planner_includes_learned_guidance_in_prompt():
+    from memory.context import ContextEngine
+    from memory import MemoryStore
+
+    store = MemoryStore()
+    store.remember(
+        "experience:success",
+        {
+            "goal": "Create a research brief",
+            "success": True,
+            "tools_used": ["web_search"],
+            "recovery_diagnoses": [],
+        },
+        category="experience",
+    )
+    context = ContextEngine(store).build(Goal("Create a research brief"))
+    provider = FakeProvider('{"tasks": [{"id": "research", "description": "Research the topic"}]}')
+
+    ModelPlanner(provider).create_plan(Goal("Create a research brief"), context=context)
+
+    prompt = "\n".join(message.content for message in provider.messages)
+    assert "preferred_tools" in prompt
+    assert "web_search" in prompt
