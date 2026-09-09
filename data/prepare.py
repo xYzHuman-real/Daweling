@@ -7,7 +7,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .manifest import DatasetManifest, canonical_example_hash, sha256_file
+try:
+    from .manifest import DatasetManifest, canonical_example_hash, sha256_file
+except ImportError:  # Support ``python data/prepare.py ...`` from the repository root.
+    from data.manifest import DatasetManifest, canonical_example_hash, sha256_file
 
 
 def validate_example(example: Any) -> tuple[bool, str]:
@@ -48,7 +51,7 @@ def prepare_dataset(
     valid = duplicates = invalid = 0
 
     with source_path.open("r", encoding="utf-8") as source, destination.open("w", encoding="utf-8") as target:
-        for line_number, line in enumerate(source, start=1):
+        for line in source:
             try:
                 example = json.loads(line)
             except json.JSONDecodeError:

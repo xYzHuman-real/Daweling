@@ -7,7 +7,9 @@ from pathlib import Path
 
 import torch
 
+from data.manifest import DatasetManifest
 from model import DawelingTokenizer, ModelConfig, DawelingTransformer
+from training.experiment import TrainingRunManifest, make_run_id, sha256_file
 
 
 def make_examples(text: str, tokenizer: DawelingTokenizer, sequence_length: int):
@@ -18,7 +20,19 @@ def make_examples(text: str, tokenizer: DawelingTokenizer, sequence_length: int)
         yield torch.tensor(chunk[:-1], dtype=torch.long), torch.tensor(chunk[1:], dtype=torch.long)
 
 
-def train(text_path: Path, output_path: Path, steps: int, learning_rate: float) -> None:
+def train(
+    text_path: Path,
+    output_path: Path,
+    steps: int,
+    learning_rate: float,
+    *,
+    seed: int = 0,
+    dataset_manifest_path: Path | None = None,
+) -> TrainingRunManifest:
+    if steps <= 0:
+        raise ValueError("steps must be greater than zero")
+    torch.manual_seed(seed)
+
     tokenizer = DawelingTokenizer()
     config = ModelConfig(vocab_size=tokenizer.vocab_size)
     model = DawelingTransformer(config)
@@ -43,7 +57,31 @@ def train(text_path: Path, output_path: Path, steps: int, learning_rate: float) 
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"config": config.__dict__, "state_dict": model.state_dict()}, output_path)
+
+    dataset_sha256 = None
+    if dataset_manifest_path is not None:
+        manifest = DatasetManifest.load(dataset_manifest_path)
+        dataset_sha256 = manifest.output_sha256
+
+    training_config = {"steps": steps, "learning_rate": learning_rate, "sequence_length": config.max_sequence_length}
+    model_config = config.__dict__
+    run_id = make_run_id(stage="pretraining", dataset_sha256=dataset_sha256, model_config=model_config, training_config=training_config, seed=seed)
+    lineage = TrainingRunManifest(
+        run_id=run_id,
+        stage="pretraining",
+        dataset_manifest=str(dataset_manifest_path) if dataset_manifest_path else None,
+        dataset_sha256=dataset_sha256,
+        model_config=model_config,
+        training_config=training_config,
+        seed=seed,
+        checkpoint_path=str(output_path),
+        checkpoint_sha256=sha256_file(output_path),
+        metadata={"training_text_sha256": sha256_file(text_path)},
+    )
+    lineage.save(output_path.with_suffix(output_path.suffix + ".manifest.json"))
     print(f"saved checkpoint: {output_path}")
+    print(f"saved run manifest: {output_path.with_suffix(output_path.suffix + '.manifest.json')}")
+    return lineage
 
 
 if __name__ == "__main__":
@@ -52,5 +90,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, default=Path("data/daweling-small.pt"))
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--dataset-manifest", type=Path, default=None)
     args = parser.parse_args()
-    train(args.text, args.output, args.steps, args.learning_rate)
+    train(args.text, args.output, args.steps, args.learning_rate, seed=args.seed, dataset_manifest_path=args.dataset_manifest)
