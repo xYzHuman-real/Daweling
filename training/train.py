@@ -74,9 +74,10 @@ def _save_checkpoint(path: Path, model: DawelingTransformer, optimizer: torch.op
     torch.save({"format_version": 4, "config": config, "state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "rng_state": torch.get_rng_state(), "step": step, "stage": "pretraining", "run_id": run_id, "seed": seed, "training_config": training_config, "dataset_manifest": dataset_manifest, "dataset_sha256": dataset_sha256, "validation_text_sha256": validation_text_sha256, "best_validation_loss": best_validation_loss, "best_step": best_step, "parent_checkpoint": parent_checkpoint}, path)
 
 
-def train(text_path: Path, output_path: Path, steps: int, learning_rate: float, *, seed: int = 0, dataset_manifest_path: Path | None = None, validation_text_path: Path | None = None, batch_size: int = 1, validation_interval: int = 10, resume_from: Path | None = None, best_output_path: Path | None = None, warmup_steps: int = 0, min_learning_rate: float = 0.0) -> TrainingRunManifest:
-    if steps <= 0 or batch_size <= 0 or validation_interval <= 0:
-        raise ValueError("steps, batch_size, and validation_interval must be greater than zero")
+def train(text_path: Path, output_path: Path, steps: int, learning_rate: float, *, seed: int = 0, dataset_manifest_path: Path | None = None, validation_text_path: Path | None = None, batch_size: int = 1, validation_interval: int = 10, resume_from: Path | None = None, best_output_path: Path | None = None, warmup_steps: int = 0, min_learning_rate: float = 0.0, gradient_accumulation_steps: int = 1) -> TrainingRunManifest:
+    """Train with deterministic batching, gradient accumulation, scheduling, and validation."""
+    if steps <= 0 or batch_size <= 0 or validation_interval <= 0 or gradient_accumulation_steps <= 0:
+        raise ValueError("steps, batch_size, validation_interval, and gradient_accumulation_steps must be greater than zero")
     if warmup_steps < 0 or warmup_steps >= steps:
         raise ValueError("warmup_steps must be non-negative and smaller than steps")
     torch.manual_seed(seed)
@@ -94,7 +95,7 @@ def train(text_path: Path, output_path: Path, steps: int, learning_rate: float, 
         raise ValueError("validation text is too short for the configured sequence length")
     dataset_sha256 = DatasetManifest.load(dataset_manifest_path).output_sha256 if dataset_manifest_path else None
     validation_sha256 = sha256_file(validation_path)
-    training_config = {"steps": steps, "learning_rate": learning_rate, "min_learning_rate": min_learning_rate, "warmup_steps": warmup_steps, "schedule": "warmup_cosine", "sequence_length": config.max_sequence_length, "optimizer": "AdamW", "gradient_clip_norm": 1.0, "batch_size": batch_size, "validation_interval": validation_interval}
+    training_config = {"steps": steps, "learning_rate": learning_rate, "min_learning_rate": min_learning_rate, "warmup_steps": warmup_steps, "schedule": "warmup_cosine", "sequence_length": config.max_sequence_length, "optimizer": "AdamW", "gradient_clip_norm": 1.0, "batch_size": batch_size, "gradient_accumulation_steps": gradient_accumulation_steps, "effective_batch_size": batch_size * gradient_accumulation_steps, "validation_interval": validation_interval, "example_count": len(examples), "validation_example_count": len(validation_examples)}
     model_config = config.__dict__
     run_id = make_run_id(stage="pretraining", dataset_sha256=dataset_sha256, model_config=model_config, training_config=training_config, seed=seed)
     start_step = 0
@@ -111,28 +112,33 @@ def train(text_path: Path, output_path: Path, steps: int, learning_rate: float, 
             raise ValueError("resume checkpoint dataset identity does not match the current dataset")
         if resumed.get("validation_text_sha256") not in (None, validation_sha256):
             raise ValueError("resume checkpoint validation dataset does not match the current validation text")
+        if resumed.get("training_config") and resumed["training_config"].get("gradient_accumulation_steps", 1) != gradient_accumulation_steps:
+            raise ValueError("resume checkpoint gradient accumulation configuration does not match")
         best_validation_loss, best_step = resumed.get("best_validation_loss"), resumed.get("best_step")
+    optimizer.zero_grad(set_to_none=True)
     for step in range(start_step, steps):
         current_lr = cosine_learning_rate(learning_rate, step, steps, warmup_steps=warmup_steps, min_learning_rate=min_learning_rate)
         for group in optimizer.param_groups:
             group["lr"] = current_lr
         model.train()
         inputs, targets = make_batch(examples, batch_size, step)
-        optimizer.zero_grad(set_to_none=True)
         _, loss = model(inputs, targets)
         assert loss is not None
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
+        (loss / gradient_accumulation_steps).backward()
         completed = step + 1
+        accumulation_boundary = completed % gradient_accumulation_steps == 0 or completed == steps
+        if accumulation_boundary:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
         if completed % validation_interval == 0 or completed == steps:
             val_loss = validation_loss(model, validation_examples, batch_size)
-            print(f"step={completed} lr={current_lr:.6g} train_loss={loss.item():.4f} train_ppl={perplexity(float(loss.item())):.2f} validation_loss={val_loss:.4f} validation_ppl={perplexity(val_loss):.2f}")
+            print(f"step={completed} lr={current_lr:.6g} train_loss={loss.item():.4f} train_ppl={perplexity(float(loss.item())):.2f} validation_loss={val_loss:.4f} validation_ppl={perplexity(val_loss):.2f} examples_seen={completed * batch_size}")
             if best_validation_loss is None or val_loss < best_validation_loss:
                 best_validation_loss, best_step = val_loss, completed
                 _save_checkpoint(best_output_path or output_path.with_suffix(output_path.suffix + ".best.pt"), model, optimizer, step=completed, run_id=run_id, seed=seed, config=model_config, training_config=training_config, dataset_manifest=str(dataset_manifest_path) if dataset_manifest_path else None, dataset_sha256=dataset_sha256, validation_text_sha256=validation_sha256, best_validation_loss=best_validation_loss, best_step=best_step, parent_checkpoint=parent_checkpoint)
             _save_checkpoint(output_path, model, optimizer, step=completed, run_id=run_id, seed=seed, config=model_config, training_config=training_config, dataset_manifest=str(dataset_manifest_path) if dataset_manifest_path else None, dataset_sha256=dataset_sha256, validation_text_sha256=validation_sha256, best_validation_loss=best_validation_loss, best_step=best_step, parent_checkpoint=parent_checkpoint)
-    lineage = TrainingRunManifest(run_id=run_id, stage="pretraining", dataset_manifest=str(dataset_manifest_path) if dataset_manifest_path else None, dataset_sha256=dataset_sha256, model_config=model_config, training_config=training_config, seed=seed, checkpoint_path=str(output_path), checkpoint_sha256=sha256_file(output_path), parent_checkpoint=parent_checkpoint, metadata={"training_text_sha256": sha256_file(text_path), "validation_text_sha256": validation_sha256}, last_step=steps, best_validation_loss=best_validation_loss, best_step=best_step)
+    lineage = TrainingRunManifest(run_id=run_id, stage="pretraining", dataset_manifest=str(dataset_manifest_path) if dataset_manifest_path else None, dataset_sha256=dataset_sha256, model_config=model_config, training_config=training_config, seed=seed, checkpoint_path=str(output_path), checkpoint_sha256=sha256_file(output_path), parent_checkpoint=parent_checkpoint, metadata={"training_text_sha256": sha256_file(text_path), "validation_text_sha256": validation_sha256, "training_examples": len(examples), "validation_examples": len(validation_examples), "effective_batch_size": batch_size * gradient_accumulation_steps, "examples_seen": steps * batch_size}, last_step=steps, best_validation_loss=best_validation_loss, best_step=best_step)
     lineage.save(output_path.with_suffix(output_path.suffix + ".manifest.json"))
     print(f"saved checkpoint: {output_path}")
     return lineage
@@ -148,10 +154,11 @@ if __name__ == "__main__":
     parser.add_argument("--dataset-manifest", type=Path, default=None)
     parser.add_argument("--validation-text", type=Path, default=None)
     parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
     parser.add_argument("--validation-interval", type=int, default=10)
     parser.add_argument("--resume-from", type=Path, default=None)
     parser.add_argument("--best-output", type=Path, default=None)
     parser.add_argument("--warmup-steps", type=int, default=0)
     parser.add_argument("--min-learning-rate", type=float, default=0.0)
     args = parser.parse_args()
-    train(args.text, args.output, args.steps, args.learning_rate, seed=args.seed, dataset_manifest_path=args.dataset_manifest, validation_text_path=args.validation_text, batch_size=args.batch_size, validation_interval=args.validation_interval, resume_from=args.resume_from, best_output_path=args.best_output, warmup_steps=args.warmup_steps, min_learning_rate=args.min_learning_rate)
+    train(args.text, args.output, args.steps, args.learning_rate, seed=args.seed, dataset_manifest_path=args.dataset_manifest, validation_text_path=args.validation_text, batch_size=args.batch_size, validation_interval=args.validation_interval, resume_from=args.resume_from, best_output_path=args.best_output, warmup_steps=args.warmup_steps, min_learning_rate=args.min_learning_rate, gradient_accumulation_steps=args.gradient_accumulation_steps)
