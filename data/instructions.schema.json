@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Daweling Instruction Example",
+  "type": "object",
+  "required": ["instruction", "response"],
+  "properties": {
+    "instruction": {"type": "string", "minLength": 1},
+    "response": {"type": "string", "minLength": 1},
+    "source": {"type": "string"},
+    "license": {"type": "string"},
+    "quality": {"type": "number", "minimum": 0, "maximum": 1}
+  },
+  "additionalProperties": false
+}
