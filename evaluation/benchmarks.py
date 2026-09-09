@@ -32,14 +32,17 @@ class BenchmarkReport:
 def run_benchmark(
     name: str, model: Callable[[str], str], cases: Iterable[BenchmarkCase]
 ) -> BenchmarkReport:
-    results = tuple(
-        BenchmarkResult(
-            case_id=case.id,
-            score=exact_match(model(case.prompt), case.expected),
-            prediction=model(case.prompt),
+    results_list: list[BenchmarkResult] = []
+    for case in cases:
+        prediction = model(case.prompt)
+        results_list.append(
+            BenchmarkResult(
+                case_id=case.id,
+                score=exact_match(prediction, case.expected),
+                prediction=prediction,
+            )
         )
-        for case in cases
-    )
+    results = tuple(results_list)
     return BenchmarkReport(
         name=name,
         results=results,
