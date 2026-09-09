@@ -40,10 +40,20 @@ class DatasetManifest:
     preprocessing: dict[str, Any] = field(default_factory=dict)
     sources: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    quality_rejected_count: int = 0
+    contamination_rejected_count: int = 0
+    quality_issues: dict[str, int] = field(default_factory=dict)
+    contamination_benchmark_ids: dict[str, int] = field(default_factory=dict)
     manifest_version: str = MANIFEST_VERSION
 
     def __post_init__(self) -> None:
-        for name in ("example_count", "duplicate_count", "invalid_count"):
+        for name in (
+            "example_count",
+            "duplicate_count",
+            "invalid_count",
+            "quality_rejected_count",
+            "contamination_rejected_count",
+        ):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be non-negative")
 
