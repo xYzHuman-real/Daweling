@@ -8,7 +8,6 @@ from typing import Iterable
 from model.generate import GenerationConfig
 from evaluation.benchmarks import BenchmarkCase
 from evaluation.checkpoint_selection import CheckpointSelection
-from evaluation.release import evaluate_and_select_checkpoints
 from .train import train
 from .experiment import TrainingRunManifest
 
@@ -42,6 +41,10 @@ def train_evaluate_release(
     min_learning_rate: float = 0.0,
 ) -> tuple[TrainingRunManifest, CheckpointSelection]:
     """Train, evaluate, and select a release candidate with matching training settings."""
+    # Import lazily: evaluation.release imports training.experiment, so importing
+    # it at module load time creates an evaluation -> training -> evaluation cycle.
+    from evaluation.release import evaluate_and_select_checkpoints
+
     output = Path(output_path)
     best = Path(best_output_path) if best_output_path is not None else output.with_suffix(output.suffix + ".best.pt")
     training_manifest = train(
