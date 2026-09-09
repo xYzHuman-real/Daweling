@@ -38,7 +38,7 @@ def generate(
     prompt: str,
     config: GenerationConfig | None = None,
 ) -> str:
-    """Generate text from a prompt using causal next-token prediction."""
+    """Generate text from a causal Daweling model using next-token prediction."""
     config = config or GenerationConfig()
     if config.max_new_tokens < 0:
         raise ValueError("max_new_tokens must be non-negative")
@@ -48,12 +48,13 @@ def generate(
     ids = tokenizer.encode(prompt, add_bos=True, add_eos=False)
     tokens = torch.tensor([ids], dtype=torch.long, device=device)
 
-    context_limit = getattr(getattr(model, "config", None), "max_seq_len", None)
+    model_config = getattr(model, "config", None)
+    context_limit = getattr(model_config, "max_sequence_length", None)
     with torch.no_grad():
         for _ in range(config.max_new_tokens):
             context = tokens[:, -context_limit:] if context_limit else tokens
             output = model(context)
-            logits = output.logits if hasattr(output, "logits") else output
+            logits = output[0] if isinstance(output, tuple) else getattr(output, "logits", output)
             next_token = _sample_next(logits[:, -1, :], config)
             tokens = torch.cat((tokens, next_token), dim=1)
             if next_token.item() == tokenizer.eos_id:
